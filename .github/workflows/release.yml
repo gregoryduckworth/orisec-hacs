@@ -5,23 +5,25 @@ on:
     types: [published]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # The release asset is what HACS installs (hacs.json sets zip_release), so
+  # gating the upload on a green CI run means a release with failing tests is
+  # never installable.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   release:
     name: Publish release asset
     runs-on: ubuntu-latest
+    needs: ci
+    permissions:
+      contents: write
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
 
       - name: Sync manifest version with the release tag
         run: |

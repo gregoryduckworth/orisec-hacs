@@ -1,267 +1,137 @@
-"""Focused tests for the local protocol/client helpers."""
+"""Tests for the Orisec packet encoding and decoding helpers."""
 
 from __future__ import annotations
 
-import unittest
+from struct import pack
 
-from custom_components.orisec.api import AuthenticationError, OrisecLocalClient, ResponseError
-from custom_components.orisec.const import (
-    CMD_INFO_REQUEST,
-    CMD_INFO_RESPONSE,
-    CMD_KEEPALIVE,
-    CMD_LOGIN,
-    CMD_MAX_ZONES,
-    CMD_MOTION_EVENTS,
-    CMD_SERIAL_NUMBER,
-    CMD_SESSION_INFO,
-    CMD_ZONE_NAMES,
-    CMD_ZONE_STATUS,
+import pytest
+
+from custom_components.orisec.protocol import (
+    ProtocolError,
+    Submessage,
+    crc16_xmodem,
+    pack_message,
+    pack_submessage,
+    unpack_message,
 )
-from custom_components.orisec.protocol import Submessage, crc16_xmodem, pack_message, unpack_message
 
 
-class FakeSocket:
-    """Simple fake UDP socket for client tests."""
+def corrupt_last_byte(payload: bytes) -> bytes:
+    """Return the payload with its final CRC byte flipped."""
 
-    def __init__(self, responses: list[bytes]) -> None:
-        self._responses = list(responses)
-        self.sent_packets: list[tuple[bytes, tuple[str, int]]] = []
-        self.timeout = None
-        self.closed = False
-
-    def settimeout(self, timeout: float) -> None:
-        self.timeout = timeout
-
-    def sendto(self, payload: bytes, address: tuple[str, int]) -> None:
-        self.sent_packets.append((payload, address))
-
-    def recvfrom(self, size: int) -> tuple[bytes, tuple[str, int]]:
-        return self._responses.pop(0), ("panel", 20202)
-
-    def close(self) -> None:
-        self.closed = True
+    return payload[:-1] + bytes([payload[-1] ^ 0xFF])
 
 
-class ProtocolTests(unittest.TestCase):
-    def test_crc16_matches_reference_vector(self) -> None:
-        self.assertEqual(crc16_xmodem(b"123456789"), 0x29B1)
+def frame(body: bytes) -> bytes:
+    """Wrap an arbitrary body in a well-formed length header and CRC trailer."""
 
-    def test_pack_unpack_round_trip(self) -> None:
-        payload = pack_message(
+    payload = pack("<H", 2 + len(body) + 2) + body
+    return payload + pack("<H", crc16_xmodem(payload))
+
+
+class TestCrc16Xmodem:
+    def test_matches_the_published_check_vector(self) -> None:
+        assert crc16_xmodem(b"123456789") == 0x29B1
+
+    def test_returns_the_seed_for_an_empty_input(self) -> None:
+        assert crc16_xmodem(b"") == 0xFFFF
+
+    def test_detects_a_single_flipped_bit(self) -> None:
+        assert crc16_xmodem(b"\x00") != crc16_xmodem(b"\x01")
+
+    def test_depends_on_byte_order(self) -> None:
+        assert crc16_xmodem(b"\x01\x02") != crc16_xmodem(b"\x02\x01")
+
+
+class TestSubmessage:
+    def test_defaults_to_a_single_empty_entry_starting_at_one(self) -> None:
+        submessage = Submessage(cmd_id=0x0001)
+
+        assert (submessage.start, submessage.count, submessage.data) == (1, 1, b"")
+
+
+class TestPackSubmessage:
+    def test_writes_the_four_header_fields_as_little_endian_words(self) -> None:
+        encoded = pack_submessage(Submessage(cmd_id=0x045A, start=2, count=3, data=b"ab"))
+
+        assert encoded == b"\x5a\x04\x02\x00\x03\x00\x02\x00ab"
+
+    def test_declares_a_zero_length_body_when_there_is_no_data(self) -> None:
+        encoded = pack_submessage(Submessage(cmd_id=0x0001))
+
+        assert encoded == b"\x01\x00\x01\x00\x01\x00\x00\x00"
+
+
+class TestPackMessage:
+    def test_prefixes_the_total_datagram_length(self) -> None:
+        payload = pack_message(Submessage(cmd_id=0x0001, data=b"1234"))
+
+        assert payload[:2] == pack("<H", len(payload))
+
+    def test_appends_a_crc_over_everything_before_it(self) -> None:
+        payload = pack_message(Submessage(cmd_id=0x0001, data=b"1234"))
+
+        assert payload[-2:] == pack("<H", crc16_xmodem(payload[:-2]))
+
+    def test_encodes_an_empty_datagram_as_header_plus_crc(self) -> None:
+        assert pack_message() == b"\x04\x00" + pack("<H", crc16_xmodem(b"\x04\x00"))
+
+    def test_concatenates_submessages_in_the_given_order(self) -> None:
+        payload = pack_message(Submessage(cmd_id=0x0001), Submessage(cmd_id=0x0002))
+
+        assert payload[2:-2] == pack_submessage(Submessage(cmd_id=0x0001)) + pack_submessage(
+            Submessage(cmd_id=0x0002)
+        )
+
+
+class TestUnpackMessage:
+    def test_round_trips_multiple_submessages(self) -> None:
+        submessages = [
             Submessage(cmd_id=0x0001, data=b"1234"),
-            Submessage(cmd_id=0x045A, count=1),
-        )
+            Submessage(cmd_id=0x045A, start=7, count=9, data=b""),
+            Submessage(cmd_id=0x2850, start=1, count=2, data=b"\x00\xff"),
+        ]
 
-        decoded = unpack_message(payload)
+        assert unpack_message(pack_message(*submessages)) == submessages
 
-        self.assertEqual(
-            decoded,
-            [
-                Submessage(cmd_id=0x0001, start=1, count=1, data=b"1234"),
-                Submessage(cmd_id=0x045A, start=1, count=1, data=b""),
-            ],
-        )
+    def test_returns_no_submessages_for_an_empty_datagram(self) -> None:
+        assert unpack_message(pack_message()) == []
 
-    def test_client_parses_known_responses(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(
-                    Submessage(cmd_id=CMD_LOGIN),
-                    Submessage(cmd_id=CMD_SESSION_INFO, data=b"\x01\x02"),
-                    Submessage(cmd_id=CMD_INFO_RESPONSE, data=b"\x00\x00\x14\x00"),
-                ),
-                pack_message(Submessage(cmd_id=CMD_MAX_ZONES, data=b"\x14\x00")),
-                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=2, data=b"Front Door\x00Hall\x00")),
-                pack_message(Submessage(cmd_id=CMD_MOTION_EVENTS, count=2, data=b"\x01\x00\x00\x00")),
-            ]
-        )
+    def test_preserves_data_bytes_that_look_like_a_header(self) -> None:
+        submessage = Submessage(cmd_id=0x0001, data=b"\x01\x00\x01\x00\x01\x00\x00\x00")
 
-        client = OrisecLocalClient(
-            "192.168.1.50",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
+        assert unpack_message(pack_message(submessage)) == [submessage]
 
-        client.login()
-        self.assertEqual(client.read_session_info(), b"\x01\x02")
-        self.assertEqual(client.read_panel_model(), 20)
-        self.assertEqual(client.read_max_zones(), 20)
-        self.assertEqual(client.read_zone_names(2), ["Front Door", "Hall"])
-        self.assertEqual(client.read_motion_events(2), [1, 0])
-        client.keepalive()
-        client.close()
+    @pytest.mark.parametrize(
+        ("payload", "reason"),
+        [
+            pytest.param(b"", "Payload too short", id="empty"),
+            pytest.param(b"\x03\x00\x00", "Payload too short", id="shorter-than-header-and-crc"),
+            pytest.param(b"\xff\xff\x00\x00", "Payload length does not match header", id="length-mismatch"),
+            pytest.param(
+                corrupt_last_byte(pack_message(Submessage(cmd_id=0x0001))),
+                "CRC mismatch",
+                id="corrupt-crc",
+            ),
+            pytest.param(frame(b"\x01\x00\x01\x00"), "Truncated submessage header", id="partial-header"),
+            pytest.param(
+                frame(b"\x01\x00\x01\x00\x01\x00\x08\x00ab"),
+                "Truncated submessage payload",
+                id="data-shorter-than-declared",
+            ),
+        ],
+    )
+    def test_rejects_malformed_payloads(self, payload: bytes, reason: str) -> None:
+        with pytest.raises(ProtocolError, match=reason):
+            unpack_message(payload)
 
-        self.assertEqual(fake_socket.sent_packets[0][1], ("192.168.1.50", 20202))
-        keepalive_payload = unpack_message(fake_socket.sent_packets[-1][0])
-        self.assertEqual(
-            keepalive_payload,
-            [Submessage(cmd_id=CMD_KEEPALIVE, start=1, count=2, data=b"\x01\x00\x02\x04")],
-        )
-        self.assertTrue(fake_socket.closed)
+    def test_rejects_a_payload_whose_body_was_tampered_with(self) -> None:
+        payload = bytearray(pack_message(Submessage(cmd_id=0x0001, data=b"1234")))
+        payload[10] ^= 0xFF
 
-    def test_client_can_request_panel_model_without_login(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_INFO_RESPONSE, data=b"\x00\x00\x28\x00")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.51",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        self.assertEqual(client.read_panel_model(), 40)
-        packet = unpack_message(fake_socket.sent_packets[0][0])
-        self.assertEqual(packet, [Submessage(cmd_id=CMD_INFO_REQUEST, start=1, count=1, data=b"")])
-
-    def test_decode_strings_preserves_empty_positions(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=3, data=b"Front Door\x00\x00Hall \x00")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.52",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        self.assertEqual(client.read_zone_names(3), ["Front Door", "", "Hall "])
-
-    def test_query_many_preserves_duplicate_command_ids(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(
-                    Submessage(cmd_id=CMD_ZONE_NAMES, count=1, data=b"Front Door\x00"),
-                    Submessage(cmd_id=CMD_ZONE_NAMES, count=1, data=b"Hall\x00"),
-                ),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.53",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        responses = client.query_many([Submessage(cmd_id=CMD_ZONE_NAMES, count=2)])
-        self.assertEqual(
-            responses,
-            [
-                Submessage(cmd_id=CMD_ZONE_NAMES, start=1, count=1, data=b"Front Door\x00"),
-                Submessage(cmd_id=CMD_ZONE_NAMES, start=1, count=1, data=b"Hall\x00"),
-            ],
-        )
-
-    def test_short_payload_decoders_raise_response_error(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_MAX_ZONES, data=b"\x14")),
-                pack_message(Submessage(cmd_id=CMD_MOTION_EVENTS, count=2, data=b"\x01\x00\x00")),
-                pack_message(Submessage(cmd_id=CMD_INFO_RESPONSE, data=b"\x00\x00\x14")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.54",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        with self.assertRaises(ResponseError):
-            client.read_max_zones()
-        with self.assertRaises(ResponseError):
-            client.read_motion_events(2)
-        with self.assertRaises(ResponseError):
-            client.read_panel_model()
-
-    def test_invalid_serial_payload_raises_response_error(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"\xff\xfe\x00")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.55",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        with self.assertRaises(ResponseError):
-            client.read_serial_number()
-
-    def test_serial_number_stops_at_first_terminator(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"CPD0001\x00\x00PAD")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.59",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        self.assertEqual(client.read_serial_number(), "CPD0001")
-
-    def test_zone_status_supports_two_byte_entries(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_ZONE_STATUS, count=2, data=b"\x01\x00\x02\x00")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.56",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        self.assertEqual(client.read_zone_status(2), [1, 2])
-
-    def test_motion_payload_with_unexpected_length_raises_response_error(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_MOTION_EVENTS, count=2, data=b"\x01\x00\x02\x00\x03\x00")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.60",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        with self.assertRaises(ResponseError):
-            client.read_motion_events(2)
-
-    def test_invalid_string_payload_raises_response_error(self) -> None:
-        fake_socket = FakeSocket(
-            [
-                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=1, data=b"\xff\x00")),
-            ]
-        )
-
-        client = OrisecLocalClient(
-            "192.168.1.57",
-            "1234",
-            socket_factory=lambda: fake_socket,
-        )
-
-        with self.assertRaises(ResponseError):
-            client.read_zone_names(1)
-
-    def test_non_ascii_password_raises_authentication_error(self) -> None:
-        client = OrisecLocalClient("192.168.1.58", "päss")
-
-        with self.assertRaisesRegex(AuthenticationError, "ASCII"):
-            client.login()
+        with pytest.raises(ProtocolError, match="CRC mismatch"):
+            unpack_message(bytes(payload))
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_protocol_error_is_a_value_error() -> None:
+    assert issubclass(ProtocolError, ValueError)
