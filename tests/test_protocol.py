@@ -191,6 +191,21 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ResponseError):
             client.read_serial_number()
 
+    def test_serial_number_stops_at_first_terminator(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"CPD0001\x00\x00PAD")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.59",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        self.assertEqual(client.read_serial_number(), "CPD0001")
+
     def test_zone_status_supports_two_byte_entries(self) -> None:
         fake_socket = FakeSocket(
             [
@@ -205,6 +220,22 @@ class ProtocolTests(unittest.TestCase):
         )
 
         self.assertEqual(client.read_zone_status(2), [1, 2])
+
+    def test_motion_payload_with_unexpected_length_raises_response_error(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_MOTION_EVENTS, count=2, data=b"\x01\x00\x02\x00\x03\x00")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.60",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        with self.assertRaises(ResponseError):
+            client.read_motion_events(2)
 
     def test_invalid_string_payload_raises_response_error(self) -> None:
         fake_socket = FakeSocket(

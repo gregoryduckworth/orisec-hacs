@@ -179,9 +179,10 @@ class OrisecLocalClient:
         """Return the serial number string."""
 
         try:
-            return self.query(CMD_SERIAL_NUMBER).data.rstrip(b"\x00").decode("ascii")
+            serial = self.query(CMD_SERIAL_NUMBER).data.decode("ascii")
         except UnicodeDecodeError as exc:
             raise ResponseError("Serial number payload was not valid ASCII") from exc
+        return serial.split("\x00", 1)[0]
 
     def read_max_zones(self) -> int:
         """Return the maximum zones supported by the panel."""
@@ -223,9 +224,9 @@ class OrisecLocalClient:
 
         data = self.query(CMD_MOTION_EVENTS, count=count).data
         expected_length = count * 2
-        if len(data) < expected_length:
-            raise ResponseError("Motion payload was shorter than requested")
-        return list(unpack(f"<{count}H", data[:expected_length]))
+        if len(data) != expected_length:
+            raise ResponseError("Motion payload length did not match the requested count")
+        return list(unpack(f"<{count}H", data))
 
     @staticmethod
     def _decode_uint16(data: bytes, label: str) -> int:
