@@ -29,9 +29,9 @@ CHANGELOG_INTRO = (
 
 RELEASE_TYPES = ("major", "minor", "patch")
 
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:b(\d+))?$")
 MANIFEST_VERSION_RE = re.compile(r'("version"\s*:\s*")([^"]*)(")')
-RELEASE_COMMIT_RE = re.compile(r"^chore\(release\):\s*v?\d+\.\d+\.\d+\s*$")
+RELEASE_COMMIT_RE = re.compile(r"^chore\(release\):\s*v?\d+\.\d+\.\d+(?:b\d+)?\s*$")
 COMMIT_RE = re.compile(
     r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!)?:\s+(?P<description>.+)$"
 )
@@ -91,25 +91,57 @@ class Commit:
         return f"Commit({self.short_sha!r}, {self.subject!r})"
 
 
-def parse_version(version: str) -> tuple[int, int, int]:
-    """Parse a ``major.minor.patch`` string into its numeric parts."""
+def parse_version(version: str) -> tuple[int, int, int, int | None]:
+    """Parse ``major.minor.patch`` or ``major.minor.patchbN`` into its parts.
+
+    The fourth element is the PEP 440 beta number, or ``None`` for a stable
+    version. ``0.2.0b1`` parses as ``(0, 2, 0, 1)``.
+    """
     match = VERSION_RE.match(version.strip())
     if match is None:
-        raise ReleaseError(f"Version {version!r} is not a major.minor.patch version")
-    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+        raise ReleaseError(f"Version {version!r} is not a major.minor.patch[bN] version")
+    beta = match.group(4)
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+        int(beta) if beta is not None else None,
+    )
 
 
-def bump_version(version: str, release_type: str) -> str:
-    """Return ``version`` bumped by ``release_type``."""
+def bump_version(version: str, release_type: str, *, beta: bool = False) -> str:
+    """Return ``version`` bumped by ``release_type``.
+
+    Once a beta line is open the base version is already decided, so
+    ``release_type`` no longer applies to it: a further beta increments the beta
+    number and a stable run promotes the same base. Both ignore ``release_type``.
+
+        0.1.0    minor, beta -> 0.2.0b1
+        0.2.0b1  minor, beta -> 0.2.0b2   (same base, next beta)
+        0.2.0b2  minor       -> 0.2.0     (promoted unchanged)
+    """
     if release_type not in RELEASE_TYPES:
         raise ReleaseError(f"Release type {release_type!r} must be one of {', '.join(RELEASE_TYPES)}")
 
-    major, minor, patch = parse_version(version)
+    major, minor, patch, current_beta = parse_version(version)
+
+    if current_beta is not None:
+        base = f"{major}.{minor}.{patch}"
+        return f"{base}b{current_beta + 1}" if beta else base
+
     if release_type == "major":
-        return f"{major + 1}.0.0"
-    if release_type == "minor":
-        return f"{major}.{minor + 1}.0"
-    return f"{major}.{minor}.{patch + 1}"
+        base = f"{major + 1}.0.0"
+    elif release_type == "minor":
+        base = f"{major}.{minor + 1}.0"
+    else:
+        base = f"{major}.{minor}.{patch + 1}"
+
+    return f"{base}b1" if beta else base
+
+
+def is_beta(version: str) -> bool:
+    """Return whether ``version`` is a beta."""
+    return parse_version(version)[3] is not None
 
 
 def read_manifest_version(manifest_path: Path = MANIFEST_PATH) -> str:
@@ -153,10 +185,17 @@ def _git(*args: str) -> str:
     return result.stdout.strip()
 
 
-def latest_tag() -> str | None:
-    """Return the most recent reachable tag, or ``None`` for a first release."""
+def latest_tag(*, stable_only: bool = False) -> str | None:
+    """Return the most recent reachable tag, or ``None`` for a first release.
+
+    With ``stable_only`` the beta tags are skipped, so a stable release reports
+    every change since the last stable one rather than only since its last beta.
+    """
+    args = ["describe", "--tags", "--abbrev=0"]
+    if stable_only:
+        args.append("--exclude=*b[0-9]*")
     try:
-        return _git("describe", "--tags", "--abbrev=0") or None
+        return _git(*args) or None
     except subprocess.CalledProcessError:
         return None
 
@@ -314,6 +353,11 @@ def main(argv: list[str] | None = None) -> int:
         help="write the rendered release notes to this file",
     )
     parser.add_argument(
+        "--beta",
+        action="store_true",
+        help="publish a beta of the bumped version (0.2.0b1) instead of a stable release",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="render the notes without editing the manifest or changelog",
@@ -322,8 +366,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         previous_version = read_manifest_version()
-        new_version = bump_version(previous_version, args.release_type)
-        previous_tag = latest_tag()
+        new_version = bump_version(previous_version, args.release_type, beta=args.beta)
+        prerelease = is_beta(new_version)
+        # A stable release reports everything since the last stable tag, so the
+        # changes already shipped in its betas are not lost from the changelog.
+        previous_tag = latest_tag(stable_only=not prerelease)
         notes = render_release_notes(
             new_version,
             build_sections(collect_commits(previous_tag)),
@@ -333,7 +380,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if not args.dry_run:
             write_manifest_version(new_version)
-            update_changelog(notes)
+            # Betas are transient, so they stay out of the changelog; the stable
+            # release that promotes them carries their entries instead.
+            if not prerelease:
+                update_changelog(notes)
         if args.notes_file:
             args.notes_file.write_text(notes, encoding="utf-8")
     except ReleaseError as err:
@@ -346,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
             "previous_tag": previous_tag or "",
             "version": new_version,
             "tag": f"v{new_version}",
+            "prerelease": "true" if prerelease else "false",
             "notes": notes,
         }
     )

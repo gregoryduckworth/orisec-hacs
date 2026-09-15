@@ -12,6 +12,10 @@ on:
           - patch
           - minor
           - major
+      beta:
+        description: "Publish as a beta pre-release (0.2.0b1) instead of a stable release"
+        type: boolean
+        default: false
       dry_run:
         description: "Preview the bump and changelog without committing or publishing"
         type: boolean
@@ -26,7 +30,7 @@ concurrency:
 
 jobs:
   prepare:
-    name: ${{ inputs.release_type }} release
+    name: ${{ inputs.release_type }} ${{ inputs.beta && 'beta' || 'release' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -59,15 +63,18 @@ jobs:
         id: prepare
         env:
           RELEASE_TYPE: ${{ inputs.release_type }}
+          BETA: ${{ inputs.beta }}
           DRY_RUN: ${{ inputs.dry_run }}
           REPOSITORY: ${{ github.repository }}
         run: |
           args=(
             --release-type "$RELEASE_TYPE"
             --repository "$REPOSITORY"
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
-            "$RUNNER_TEMP/orisec.zip#orisec.zip"
+            --notes-file "$RUNNER_TEMP/release-notes.md"
           )
+          if [ "$BETA" = "true" ]; then
+            args+=(--beta)
+          fi
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
@@ -95,7 +102,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md custom_components/orisec/manifest.json
+          git add custom_components/orisec/manifest.json
+          # Betas deliberately skip the changelog, and it does not exist at all
+          # before the first stable release, so only stage it when present.
+          if [ -f CHANGELOG.md ]; then
+            git add CHANGELOG.md
+          fi
           git commit -m "chore(release): v$VERSION"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "HEAD:${GITHUB_REF_NAME}"
@@ -109,10 +121,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.prepare.outputs.tag }}
+          PRERELEASE: ${{ steps.prepare.outputs.prerelease }}
         run: |
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+          args=(--title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          # The zip is the asset hacs.json installs from, so it is attached here
+          # as part of creating the release rather than uploaded afterwards.
+          gh release create "$TAG" "${args[@]}" "$RUNNER_TEMP/orisec.zip#orisec.zip"
 
       - name: Summarise the release
         env:
