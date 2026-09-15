@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import socket
+from collections.abc import Callable
 from struct import unpack
-from typing import Callable
 
 from .const import (
     CMD_AREA_COUNT,
@@ -61,7 +61,7 @@ class OrisecLocalClient:
         self._session_info: bytes | None = None
         self._panel_model: int | None = None
 
-    def __enter__(self) -> "OrisecLocalClient":
+    def __enter__(self) -> OrisecLocalClient:
         self.open()
         return self
 
@@ -105,7 +105,7 @@ class OrisecLocalClient:
 
         try:
             payload, _ = self._socket.recvfrom(4096)
-        except (socket.timeout, TimeoutError) as exc:
+        except TimeoutError as exc:
             raise OrisecError(f"Timed out waiting for response from {self.host}:{self.port}") from exc
 
         try:
