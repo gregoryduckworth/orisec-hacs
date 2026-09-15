@@ -13,6 +13,7 @@ from scripts.release import (
     build_sections,
     bump_version,
     classify_commit,
+    is_beta,
     is_release_commit,
     parse_git_log,
     prepend_changelog,
@@ -35,6 +36,27 @@ class BumpVersionTests(unittest.TestCase):
     def test_minor_bump_resets_patch(self) -> None:
         self.assertEqual(bump_version("1.4.7", "minor"), "1.5.0")
 
+    def test_beta_of_a_stable_version_starts_a_new_beta_line(self) -> None:
+        self.assertEqual(bump_version("0.1.0", "minor", beta=True), "0.2.0b1")
+
+    def test_beta_of_a_patch_bump_marks_the_patch_version(self) -> None:
+        self.assertEqual(bump_version("0.1.0", "patch", beta=True), "0.1.1b1")
+
+    def test_beta_of_a_major_bump_marks_the_major_version(self) -> None:
+        self.assertEqual(bump_version("0.1.0", "major", beta=True), "1.0.0b1")
+
+    def test_further_beta_increments_within_the_same_base(self) -> None:
+        self.assertEqual(bump_version("0.2.0b1", "minor", beta=True), "0.2.0b2")
+
+    def test_beta_numbering_does_not_roll_over_at_nine(self) -> None:
+        self.assertEqual(bump_version("0.2.0b9", "minor", beta=True), "0.2.0b10")
+
+    def test_stable_run_promotes_the_open_beta_unchanged(self) -> None:
+        self.assertEqual(bump_version("0.2.0b2", "minor"), "0.2.0")
+
+    def test_promotion_ignores_the_requested_release_type(self) -> None:
+        self.assertEqual(bump_version("0.2.0b1", "major"), "0.2.0")
+
     def test_patch_bump_increments_patch(self) -> None:
         self.assertEqual(bump_version("1.4.7", "patch"), "1.4.8")
 
@@ -48,6 +70,18 @@ class BumpVersionTests(unittest.TestCase):
     def test_non_semver_version_is_rejected(self) -> None:
         with self.assertRaises(ReleaseError):
             bump_version("1.0", "patch")
+
+
+class IsBetaTests(unittest.TestCase):
+    def test_recognises_a_beta_version(self) -> None:
+        self.assertTrue(is_beta("0.2.0b1"))
+
+    def test_recognises_a_stable_version(self) -> None:
+        self.assertFalse(is_beta("0.2.0"))
+
+    def test_rejects_a_version_it_cannot_parse(self) -> None:
+        with self.assertRaises(ReleaseError):
+            is_beta("0.2.0-beta.1")
 
 
 class ManifestTests(unittest.TestCase):
@@ -215,6 +249,7 @@ class BuildSectionsTests(unittest.TestCase):
     def test_release_commit_is_recognised_with_and_without_the_v_prefix(self) -> None:
         self.assertTrue(is_release_commit(Commit("1111111", "chore(release): v1.2.3")))
         self.assertTrue(is_release_commit(Commit("1111111", "chore(release): 1.2.3")))
+        self.assertTrue(is_release_commit(Commit("1111111", "chore(release): v1.2.3b1")))
 
     def test_ordinary_chore_commits_are_not_treated_as_releases(self) -> None:
         self.assertFalse(is_release_commit(Commit("1111111", "chore: bump dependency to v1.2.3")))

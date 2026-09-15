@@ -169,6 +169,31 @@ anything fails. Then it:
 Tick **dry run** to see the resulting version and changelog in the workflow summary without
 committing, tagging, or publishing anything.
 
+### Beta releases
+
+Tick **beta** to publish a [PEP 440](https://peps.python.org/pep-0440/) pre-release instead.
+The bump you pick chooses the base version, and the beta number counts up from there:
+
+| From      | Bump    | Beta | Result    |
+| --------- | ------- | ---- | --------- |
+| `0.1.0`   | `minor` | yes  | `0.2.0b1` |
+| `0.2.0b1` | any     | yes  | `0.2.0b2` |
+| `0.2.0b2` | any     | no   | `0.2.0`   |
+
+Once a beta line is open the base version is already decided, so `release_type` no longer
+applies to it: a further beta increments the beta number, and an unticked run promotes the
+same base to stable. Both ignore the bump you pick, so to change the base, finish or abandon
+the line first.
+
+Betas are marked as pre-releases on GitHub and are deliberately kept out of `CHANGELOG.md`,
+which would otherwise carry an entry per beta and a near-empty one for the stable release.
+The stable release that promotes them compares against the last *stable* tag instead, so its
+notes cover everything the betas shipped.
+
+To install a beta through HACS, open the repository in HACS, enable **Show beta versions** in
+its menu, then redownload. HACS only offers pre-releases while that is on, so stable users are
+unaffected.
+
 ### Changelog entries
 
 Notes are built from the non-merge commits since the previous tag. [Conventional
