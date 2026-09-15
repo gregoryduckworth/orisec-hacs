@@ -278,3 +278,79 @@ class TestReadMotionEvents:
 
         with pytest.raises(ResponseError, match="Motion payload length did not match"):
             client.read_motion_events(2)
+
+
+class TestReadLayout:
+    def test_collects_everything_that_describes_the_panel(self, make_client) -> None:
+        client, _ = make_client(
+            [
+                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"ORI-0001\x00")),
+                INFO_REPLY,
+                pack_message(Submessage(cmd_id=CMD_ZONE_COUNT, data=b"\x02\x00")),
+                pack_message(Submessage(cmd_id=CMD_AREA_COUNT, data=b"\x01\x00")),
+                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, data=b"Front door\x00Hall PIR\x00")),
+                pack_message(Submessage(cmd_id=CMD_AREA_NAMES, data=b"House\x00")),
+            ]
+        )
+
+        layout = client.read_layout()
+
+        assert layout.serial_number == "ORI-0001"
+        assert layout.model == 40
+        assert layout.zone_names == ["Front door", "Hall PIR"]
+        assert layout.area_names == ["House"]
+
+    def test_counts_the_zones_it_found_names_for(self, make_client) -> None:
+        client, _ = make_client(
+            [
+                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"ORI-0001\x00")),
+                INFO_REPLY,
+                pack_message(Submessage(cmd_id=CMD_ZONE_COUNT, data=b"\x02\x00")),
+                pack_message(Submessage(cmd_id=CMD_AREA_COUNT, data=b"\x01\x00")),
+                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, data=b"Front door\x00Hall PIR\x00")),
+                pack_message(Submessage(cmd_id=CMD_AREA_NAMES, data=b"House\x00")),
+            ]
+        )
+
+        assert client.read_layout().zone_count == 2
+
+    def test_skips_the_name_reads_a_bare_panel_cannot_answer(self, make_client) -> None:
+        client, fake_socket = make_client(
+            [
+                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"ORI-0001\x00")),
+                INFO_REPLY,
+                pack_message(Submessage(cmd_id=CMD_ZONE_COUNT, data=b"\x00\x00")),
+                pack_message(Submessage(cmd_id=CMD_AREA_COUNT, data=b"\x00\x00")),
+            ]
+        )
+
+        layout = client.read_layout()
+
+        assert layout.zone_names == []
+        assert layout.area_names == []
+        assert len(fake_socket.sent_packets) == 4
+
+
+class TestReadState:
+    def test_reads_the_panel_and_its_zones_in_one_pass(self, make_client) -> None:
+        client, _ = make_client(
+            [
+                pack_message(Submessage(cmd_id=CMD_PANEL_STATUS, data=bytes(range(14)))),
+                pack_message(Submessage(cmd_id=CMD_ZONE_STATUS, data=b"\x00\x01")),
+            ]
+        )
+
+        state = client.read_state(2)
+
+        assert state.panel_status == bytes(range(14))
+        assert state.zone_status == [0, 1]
+
+    def test_does_not_ask_a_zoneless_panel_about_zones(self, make_client) -> None:
+        client, fake_socket = make_client(
+            [pack_message(Submessage(cmd_id=CMD_PANEL_STATUS, data=bytes(range(14))))]
+        )
+
+        state = client.read_state(0)
+
+        assert state.zone_status == []
+        assert len(fake_socket.sent_packets) == 1

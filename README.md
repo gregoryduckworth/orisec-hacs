@@ -3,7 +3,7 @@
 [![CI](https://github.com/gregoryduckworth/orisec-hacs/actions/workflows/ci.yml/badge.svg)](https://github.com/gregoryduckworth/orisec-hacs/actions/workflows/ci.yml)
 [![Validate](https://github.com/gregoryduckworth/orisec-hacs/actions/workflows/validate.yml/badge.svg)](https://github.com/gregoryduckworth/orisec-hacs/actions/workflows/validate.yml)
 
-Minimal HACS repository for local-only communication with Orisec alarm panels.
+HACS repository for local-only Home Assistant control of Orisec alarm panels.
 
 > [!WARNING]
 > **This project is under heavy development and will break without notice.**
@@ -14,9 +14,50 @@ Minimal HACS repository for local-only communication with Orisec alarm panels.
 > experimental, pin an exact version if you depend on it, and expect to have to fix
 > things up when you move between versions.
 
-This repository exposes the known Orisec LAN APIs as a small Python client under
-`custom_components/orisec` so a Home Assistant integration can talk to the panel
-directly over UDP without relying on the Orisec cloud.
+This repository talks to Orisec alarm panels directly over UDP on your own network,
+without relying on the Orisec cloud. It ships a Home Assistant integration that is added
+from the UI through a config flow, and the small Python client the integration is built
+on, both under `custom_components/orisec`.
+
+## Setting up a panel
+
+Everything is configured from the Home Assistant UI; there is nothing to put in
+`configuration.yaml`.
+
+1. **Settings → Devices & services → Add integration → Orisec Local.**
+2. Enter the panel's IP address or hostname and a user password it accepts. The UDP
+   port defaults to `20202`.
+3. The flow logs in before it saves anything, so a wrong address or password is
+   reported on the form rather than after the fact.
+
+The panel's serial number identifies the entry, so the same panel cannot be added
+twice, and moving it to a new IP address updates the existing entry instead of
+creating a second one. If the panel later stops accepting the stored password,
+Home Assistant flags the entry and prompts you for a new one rather than silently
+leaving the entities stale.
+
+**Options** (the *Configure* button on the entry) sets how often the panel is
+polled, between 5 and 3600 seconds, defaulting to 30. Changing it reloads the entry.
+
+### Entities
+
+Adding a panel creates one device, and under it:
+
+| Entity | What it reports |
+| --- | --- |
+| One sensor per configured zone | The status word the panel returns for that zone, named as the panel names the zone, with the panel's zone number in a `zone` attribute |
+| Serial number, Model, Configured zones, Areas | What the panel reported about itself when the entry was set up. `Areas` carries the area names in an `areas` attribute |
+| Panel status | The raw panel status block as hex |
+
+> [!NOTE]
+> Zone status and panel status are surfaced as the raw values the panel returns. The
+> bit layout of those words has not been confirmed against hardware, so nothing here
+> guesses them into `on`/`off` binary sensors or an alarm control panel entity. Use
+> `scripts/probe.py` against your own panel to work out what the bits mean, and open an
+> issue with what you find.
+
+New zones programmed into the panel appear after the entry is reloaded, since zone
+names are read once at setup rather than on every poll.
 
 ## Exposed local APIs
 
@@ -35,11 +76,23 @@ The client currently exposes the known local commands for:
 - motion events
 - keepalive
 
+Two composite reads sit on top of those for the integration to poll:
+`read_layout()` for the things that only change when the panel is reprogrammed, and
+`read_state()` for everything that changes between polls.
+
 ## Repository layout
 
+- `custom_components/orisec/config_flow.py` — the UI flow that adds, re-authenticates
+  and retunes a panel
+- `custom_components/orisec/__init__.py` — config entry setup, teardown and reload
+- `custom_components/orisec/coordinator.py` — the polling loop, run off the event loop
+- `custom_components/orisec/sensor.py` — the entities built from what the panel reports
+- `custom_components/orisec/entity.py` — the device every entity attaches to
 - `custom_components/orisec/api.py` — high-level local UDP client
 - `custom_components/orisec/protocol.py` — packet/submessage encoding and decoding
 - `custom_components/orisec/const.py` — known command identifiers
+- `custom_components/orisec/strings.json` — flow and entity text, mirrored into
+  `translations/en.json`
 - `scripts/release.py` — version bump and changelog generation used by the release workflow
 - `scripts/probe.py` — command line probe that dumps what a real panel reports
 - `scripts/install_local.py` — link or copy the component into a Home Assistant config
@@ -84,10 +137,9 @@ the next Home Assistant restart with no reinstall step. Use `--copy` when the co
 directory cannot follow a link out to this checkout — a container bind mount, typically —
 and `--uninstall` to remove whichever of the two is in place.
 
-> **What to expect:** the component currently ships the protocol client only. It has no
-> config flow and no platforms, so Home Assistant will load it but no integration appears
-> in the UI and no entities are created. Until that layer exists, `scripts/probe.py` is the
-> way to exercise the panel.
+After restarting Home Assistant, add the panel from the UI as described in
+[Setting up a panel](#setting-up-a-panel). `scripts/probe.py` remains the quicker way to
+check a change against real hardware without a restart.
 
 ## Development
 
@@ -98,6 +150,12 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-test.txt
 ```
 
+That pulls in Home Assistant itself, via
+[`pytest-homeassistant-custom-component`](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component),
+so the config flow and the platforms are tested against a real `hass`. The pinned
+version of that package decides which Home Assistant release the suite runs against;
+keep `hacs.json`'s `homeassistant` floor at or below it.
+
 ### Tests
 
 ```bash
@@ -106,8 +164,11 @@ python3 -m venv .venv
 
 The suite runs entirely offline. The UDP socket is the only mocked boundary, so every
 packet the client builds and parses is asserted on real bytes rather than on mocked
-decoder calls. Coverage of `custom_components/orisec` is measured with branch coverage
-enabled and the run fails below 100%, so a new code path cannot land untested.
+decoder calls — the integration tests drive a `FakePanel` that answers real protocol
+frames, so a config flow or an entity is exercised through the same encoding and
+decoding a real panel would meet. Coverage of `custom_components/orisec` is measured
+with branch coverage enabled and the run fails below 100%, so a new code path cannot
+land untested.
 
 Useful variations:
 
@@ -124,7 +185,10 @@ The tests are grouped by concern:
 | `tests/test_api_transport.py` | socket lifecycle, addressing, timeouts, `query`/`query_many` |
 | `tests/test_api_session.py` | login, session and model caching, auth failures, keepalive |
 | `tests/test_api_reads.py` | every panel read command and payload decoder |
-| `tests/test_integration_metadata.py` | `manifest.json`, `hacs.json` and `const` consistency |
+| `tests/test_config_flow.py` | adding a panel, the errors the form can show, reauth, options |
+| `tests/test_init.py` | config entry setup, polling, reload and teardown |
+| `tests/test_sensor.py` | the entities and the device a config entry creates |
+| `tests/test_integration_metadata.py` | `manifest.json`, `hacs.json`, `strings.json` and `const` consistency |
 | `tests/test_release.py` | the version bump and changelog helpers in `scripts/release.py` |
 
 The 100% gate covers `custom_components/orisec` — the code HACS ships. `scripts/release.py`
@@ -183,14 +247,14 @@ the integration yet. Outstanding, in the order they block a user:
 | Gap | Why it matters | Where it is fixed |
 | --- | --- | --- |
 | No release published | `hacs.json` sets `zip_release`, so HACS only ever downloads `orisec.zip` from a release asset. With no release there is nothing to download and installation fails outright. | Run **Prepare Release**, then publish the draft |
-| No config flow or platforms | Home Assistant loads the component but registers no integration and no entities, so an install does nothing visible. | Add `config_flow.py` and at least one platform |
 | Repository description and topics unset | The two ignored checks above. | GitHub repository settings |
 | `orisec` not in `home-assistant/brands` | The third ignored check, and required for listing in the HACS default store. Custom-repository installs work without it. | PR to [home-assistant/brands](https://github.com/home-assistant/brands) |
 
-Two smaller notes: `hassfest` warns that `async_setup` is defined without a
-`CONFIG_SCHEMA`, which is resolved by the config flow work above; and
-`OrisecLocalClient` uses blocking sockets, so the integration layer must call it through
-`async_add_executor_job` rather than directly on the event loop.
+`OrisecLocalClient` uses blocking sockets, so everything above it reaches the panel
+through `async_add_executor_job` rather than calling it on the event loop. The
+coordinator logs in again on every poll instead of holding a session open: the protocol
+is connectionless UDP, so a session that quietly expired looks exactly like a panel that
+stopped answering.
 
 ## Releasing
 

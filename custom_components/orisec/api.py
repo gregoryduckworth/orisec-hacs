@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from struct import unpack
 
 from .const import (
@@ -28,6 +29,16 @@ from .const import (
 from .protocol import ProtocolError, Submessage, pack_message, unpack_message
 
 
+def default_socket_factory() -> socket.socket:
+    """Return the UDP socket the client talks to a panel through.
+
+    Kept as a module-level hook so tests can swap in a fake socket without
+    touching the stdlib or the callers that build a client for themselves.
+    """
+
+    return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+
 class OrisecError(RuntimeError):
     """Base error for the Orisec local client."""
 
@@ -38,6 +49,30 @@ class AuthenticationError(OrisecError):
 
 class ResponseError(OrisecError):
     """Raised when an expected panel response is missing or malformed."""
+
+
+@dataclass(frozen=True)
+class PanelLayout:
+    """The parts of a panel's configuration that only change when it is reprogrammed."""
+
+    serial_number: str
+    model: int
+    zone_names: list[str] = field(default_factory=list)
+    area_names: list[str] = field(default_factory=list)
+
+    @property
+    def zone_count(self) -> int:
+        """Return the number of configured zones."""
+
+        return len(self.zone_names)
+
+
+@dataclass(frozen=True)
+class PanelState:
+    """A single poll of everything the panel reports as changing."""
+
+    panel_status: bytes
+    zone_status: list[int] = field(default_factory=list)
 
 
 class OrisecLocalClient:
@@ -56,7 +91,7 @@ class OrisecLocalClient:
         self.port = port
         self.password = password
         self.timeout = timeout
-        self._socket_factory = socket_factory or (lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
+        self._socket_factory = socket_factory or default_socket_factory
         self._socket: socket.socket | None = None
         self._session_info: bytes | None = None
         self._panel_model: int | None = None
@@ -227,6 +262,29 @@ class OrisecLocalClient:
         if len(data) != expected_length:
             raise ResponseError("Motion payload length did not match the requested count")
         return list(unpack(f"<{count}H", data))
+
+    def read_layout(self) -> PanelLayout:
+        """Read the panel identity and the names of its configured zones and areas."""
+
+        serial_number = self.read_serial_number()
+        model = self.read_panel_model()
+        zone_count = self.read_zone_count()
+        area_count = self.read_area_count()
+
+        return PanelLayout(
+            serial_number=serial_number,
+            model=model,
+            zone_names=self.read_zone_names(zone_count) if zone_count else [],
+            area_names=self.read_area_names(area_count) if area_count else [],
+        )
+
+    def read_state(self, zone_count: int) -> PanelState:
+        """Read everything that changes between polls, in one pass."""
+
+        return PanelState(
+            panel_status=self.read_panel_status_raw(),
+            zone_status=self.read_zone_status(zone_count) if zone_count else [],
+        )
 
     @staticmethod
     def _decode_uint16(data: bytes, label: str) -> int:

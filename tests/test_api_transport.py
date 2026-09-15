@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import socket
+
 import pytest
 
-from custom_components.orisec.api import OrisecError, OrisecLocalClient, ResponseError
+from custom_components.orisec.api import (
+    OrisecError,
+    OrisecLocalClient,
+    ResponseError,
+    default_socket_factory,
+)
 from custom_components.orisec.const import CMD_MAX_ZONES, CMD_ZONE_NAMES, DEFAULT_PORT, DEFAULT_TIMEOUT
 from custom_components.orisec.protocol import Submessage, pack_message
 
@@ -222,3 +229,12 @@ class TestErrorHierarchy:
 
     def test_orisec_error_is_a_runtime_error(self) -> None:
         assert issubclass(OrisecError, RuntimeError)
+
+
+class TestDefaultSocketFactory:
+    """The one place the client touches the real network stack."""
+
+    def test_hands_out_an_unbound_udp_socket(self, socket_enabled: None) -> None:
+        with default_socket_factory() as udp_socket:
+            assert udp_socket.family is socket.AF_INET
+            assert udp_socket.type is socket.SOCK_DGRAM

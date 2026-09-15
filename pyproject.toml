@@ -1,6 +1,9 @@
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# pytest-homeassistant-custom-component's fixtures are async and unmarked.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 addopts = [
     "-ra",
     "--strict-markers",
