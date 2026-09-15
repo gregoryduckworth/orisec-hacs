@@ -1,0 +1,9 @@
+{
+  "domain": "orisec",
+  "name": "Orisec Local",
+  "codeowners": ["@gregoryduckworth"],
+  "documentation": "https://github.com/gregoryduckworth/orisec-hacs",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
