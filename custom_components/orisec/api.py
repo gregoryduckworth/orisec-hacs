@@ -124,12 +124,17 @@ class OrisecLocalClient:
     def login(self) -> None:
         """Authenticate to the panel and prime basic panel info."""
 
+        try:
+            password = self.password.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise AuthenticationError("Panel password must contain only ASCII characters") from exc
+
         responses = self._group_responses(
             self.query_many(
-            [
-                Submessage(cmd_id=CMD_LOGIN, data=self.password.encode("ascii")),
-                Submessage(cmd_id=CMD_INFO_REQUEST),
-            ]
+                [
+                    Submessage(cmd_id=CMD_LOGIN, data=password),
+                    Submessage(cmd_id=CMD_INFO_REQUEST),
+                ]
             )
         )
 
@@ -204,7 +209,7 @@ class OrisecLocalClient:
         return self._decode_strings(self.query(CMD_AREA_NAMES, count=count).data, count)
 
     def read_zone_status(self, count: int) -> list[int]:
-        """Return 1-byte zone status values."""
+        """Return zone status values as 8-bit or 16-bit integers based on payload width."""
 
         data = self.query(CMD_ZONE_STATUS, count=count).data
         if len(data) == count:

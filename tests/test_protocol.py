@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from custom_components.orisec.api import OrisecLocalClient, ResponseError
+from custom_components.orisec.api import AuthenticationError, OrisecLocalClient, ResponseError
 from custom_components.orisec.const import (
     CMD_INFO_RESPONSE,
     CMD_INFO_REQUEST,
@@ -221,6 +221,12 @@ class ProtocolTests(unittest.TestCase):
 
         with self.assertRaises(ResponseError):
             client.read_zone_names(1)
+
+    def test_non_ascii_password_raises_authentication_error(self) -> None:
+        client = OrisecLocalClient("192.168.1.58", "päss")
+
+        with self.assertRaisesRegex(AuthenticationError, "ASCII"):
+            client.login()
 
 
 if __name__ == "__main__":
