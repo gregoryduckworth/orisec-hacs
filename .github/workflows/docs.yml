@@ -1,0 +1,60 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # Deployments queue rather than cancel, so main never publishes a half-built site.
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: python -m pip install --disable-pip-version-check -r requirements-docs.txt
+
+      # --strict fails on the link and nav warnings mkdocs.yml turns on, so a page
+      # renamed without updating its links never reaches the published site.
+      - name: Build the site
+        run: mkdocs build --strict
+
+      - name: Upload the site
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      # Needs Settings -> Pages -> Build and deployment -> Source set to
+      # "GitHub Actions" once, by hand, before this step can succeed.
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
