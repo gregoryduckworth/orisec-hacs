@@ -207,9 +207,11 @@ class OrisecLocalClient:
         """Return 1-byte zone status values."""
 
         data = self.query(CMD_ZONE_STATUS, count=count).data
-        if len(data) < count:
-            raise ResponseError("Zone status payload was shorter than requested")
-        return list(data[:count])
+        if len(data) == count:
+            return list(data)
+        if len(data) == count * 2:
+            return list(unpack(f"<{count}H", data))
+        raise ResponseError("Zone status payload length did not match the requested count")
 
     def read_motion_events(self, count: int) -> list[int]:
         """Return 2-byte little-endian motion values for each zone."""
@@ -228,7 +230,10 @@ class OrisecLocalClient:
 
     @staticmethod
     def _decode_strings(data: bytes, count: int) -> list[str]:
-        values = [part.decode("ascii", errors="ignore") for part in data.split(b"\x00")]
+        try:
+            values = [part.decode("ascii") for part in data.split(b"\x00")]
+        except UnicodeDecodeError as exc:
+            raise ResponseError("String payload was not valid ASCII") from exc
         if values and values[-1] == "":
             values.pop()
         if len(values) < count:

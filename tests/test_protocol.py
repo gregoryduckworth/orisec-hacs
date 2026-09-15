@@ -15,6 +15,7 @@ from custom_components.orisec.const import (
     CMD_KEEPALIVE,
     CMD_SERIAL_NUMBER,
     CMD_ZONE_NAMES,
+    CMD_ZONE_STATUS,
 )
 from custom_components.orisec.protocol import Submessage, crc16_xmodem, pack_message, unpack_message
 
@@ -189,6 +190,37 @@ class ProtocolTests(unittest.TestCase):
 
         with self.assertRaises(ResponseError):
             client.read_serial_number()
+
+    def test_zone_status_supports_two_byte_entries(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_ZONE_STATUS, count=2, data=b"\x01\x00\x02\x00")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.56",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        self.assertEqual(client.read_zone_status(2), [1, 2])
+
+    def test_invalid_string_payload_raises_response_error(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=1, data=b"\xff\x00")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.57",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        with self.assertRaises(ResponseError):
+            client.read_zone_names(1)
 
 
 if __name__ == "__main__":
