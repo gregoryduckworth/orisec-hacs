@@ -44,24 +44,62 @@ with OrisecLocalClient("192.168.1.50", "1234") as client:
     print(client.read_zone_names(client.read_max_zones()))
 ```
 
-## Tests
+## Development
+
+Install the test tooling into a virtual environment:
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-test.txt
 ```
+
+### Tests
+
+```bash
+.venv/bin/pytest
+```
+
+The suite runs entirely offline. The UDP socket is the only mocked boundary, so every
+packet the client builds and parses is asserted on real bytes rather than on mocked
+decoder calls. Coverage of `custom_components/orisec` is measured with branch coverage
+enabled and the run fails below 100%, so a new code path cannot land untested.
+
+Useful variations:
+
+```bash
+.venv/bin/pytest -k protocol          # one area
+.venv/bin/pytest --no-cov             # skip the coverage gate while iterating
+```
+
+The tests are grouped by concern:
+
+| File | Covers |
+| --- | --- |
+| `tests/test_protocol.py` | CRC, frame and submessage encoding, every decode rejection path |
+| `tests/test_api_transport.py` | socket lifecycle, addressing, timeouts, `query`/`query_many` |
+| `tests/test_api_session.py` | login, session and model caching, auth failures, keepalive |
+| `tests/test_api_reads.py` | every panel read command and payload decoder |
+| `tests/test_integration_metadata.py` | `manifest.json`, `hacs.json` and `const` consistency |
+| `tests/test_release.py` | the version bump and changelog helpers in `scripts/release.py` |
+
+The 100% gate covers `custom_components/orisec` — the code HACS ships. `scripts/release.py`
+is tested but not gated; it currently sits at 77%, with the git and `main()` plumbing
+uncovered.
+
+### Lint
 
 Lint and formatting are checked with [ruff](https://docs.astral.sh/ruff/), configured in
 `pyproject.toml`:
 
 ```bash
-ruff check .
-ruff format --check .
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
 ```
 
 ## Continuous integration
 
-- `.github/workflows/ci.yml` — runs ruff and the unit tests on Python 3.12 and 3.13 for
-  every push to `main` and every pull request.
+- `.github/workflows/ci.yml` — runs ruff and the test suite, including the coverage gate,
+  on Python 3.12 and 3.13 for every push to `main` and every pull request.
 - `.github/workflows/validate.yml` — runs Home Assistant `hassfest` and HACS repository
   validation, also on a weekly schedule so upstream requirement changes surface before a
   release does.
@@ -70,8 +108,26 @@ ruff format --check .
 - `.github/workflows/release.yml` — runs on a GitHub release published by hand and attaches
   the `orisec.zip` asset that HACS installs from.
 
-HACS validation currently ignores the `brands`, `description` and `topics` checks. To drop
-those ignores, get the `orisec` domain accepted into
+Require the `Lint`, `Test (Python 3.12)`, `Test (Python 3.13)` and `Hassfest` checks in
+branch protection for `main` so untested code cannot reach the branch releases are cut
+from.
+
+### HACS validation
+
+The `HACS` job does not pass yet, so it is not ready to be a required check. Two of its
+checks fail because the repository is private:
+
+| Check | Why it fails |
+| --- | --- |
+| `hacsjson` | HACS reads `hacs.json` over unauthenticated `raw.githubusercontent.com`, which 404s |
+| `integration_manifest` | HACS reads `manifest.json` the same way |
+
+Neither is fixable here: HACS validates that a HACS *user* could install the integration,
+and a user cannot read a private repository. Both pass as soon as the repository is
+public, at which point `HACS` can be added to the required checks above.
+
+Validation also ignores the `brands`, `description` and `topics` checks. To drop those
+ignores, get the `orisec` domain accepted into
 [home-assistant/brands](https://github.com/home-assistant/brands) and set a repository
 description and topics in GitHub settings.
 
@@ -87,7 +143,8 @@ branch. Pick the bump you want:
 | `minor` | `0.2.0`         |
 | `major` | `1.0.0`         |
 
-The workflow runs the test suite, then:
+The workflow runs the full test suite, including the coverage gate, and stops there if
+anything fails. Then it:
 
 1. Bumps `version` in `custom_components/orisec/manifest.json`, the field HACS reads. Unlike
    a manual release, this bump is committed to the default branch, so `main` and the tag
@@ -98,7 +155,8 @@ The workflow runs the test suite, then:
 4. Builds `orisec.zip` and publishes the GitHub release with the notes and that asset
    attached. It is attached here rather than by `release.yml`, because a release created
    with the default `GITHUB_TOKEN` does not trigger other workflows. `release.yml` still
-   covers releases published by hand.
+   covers releases published by hand, and gates the asset on a green `ci.yml` run so a
+   hand-published release with failing tests never becomes installable.
 
 Tick **dry run** to see the resulting version and changelog in the workflow summary without
 committing, tagging, or publishing anything.
@@ -114,3 +172,7 @@ under Other Changes, so nothing is dropped.
 The version in `manifest.json` is the starting point for the bump, so the first run of the
 workflow moves the current `0.1.0` on to `0.1.1`, `0.2.0`, or `1.0.0`. To publish the current
 version as-is instead, tag it by hand once.
+
+## License
+
+Released under the [MIT License](LICENSE).
