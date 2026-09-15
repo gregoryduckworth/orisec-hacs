@@ -41,6 +41,8 @@ The client currently exposes the known local commands for:
 - `custom_components/orisec/protocol.py` — packet/submessage encoding and decoding
 - `custom_components/orisec/const.py` — known command identifiers
 - `scripts/release.py` — version bump and changelog generation used by the release workflow
+- `scripts/probe.py` — command line probe that dumps what a real panel reports
+- `scripts/install_local.py` — link or copy the component into a Home Assistant config
 
 ## Example
 
@@ -52,6 +54,40 @@ with OrisecLocalClient("192.168.1.50", "1234") as client:
     print(client.read_panel_model())
     print(client.read_zone_names(client.read_max_zones()))
 ```
+
+## Installing and testing locally
+
+### Probe a panel without Home Assistant
+
+The fastest check against real hardware. It needs only the panel IP and a user
+password, and runs every known read in turn:
+
+```bash
+python3 scripts/probe.py --host 192.168.1.50 --password 1234
+```
+
+Each read is attempted independently, so a command your panel does not support is
+reported as one failed row rather than aborting the run. `--port` and `--timeout`
+override the defaults.
+
+### Install into a Home Assistant config
+
+HACS installs from a release asset (`zip_release`), so it cannot install an unreleased
+checkout. Link this checkout into a Home Assistant config directory instead:
+
+```bash
+python3 scripts/install_local.py --config ~/homeassistant
+```
+
+That symlinks `custom_components/orisec` into the config, so edits here take effect on
+the next Home Assistant restart with no reinstall step. Use `--copy` when the config
+directory cannot follow a link out to this checkout — a container bind mount, typically —
+and `--uninstall` to remove whichever of the two is in place.
+
+> **What to expect:** the component currently ships the protocol client only. It has no
+> config flow and no platforms, so Home Assistant will load it but no integration appears
+> in the UI and no entities are created. Until that layer exists, `scripts/probe.py` is the
+> way to exercise the panel.
 
 ## Development
 
@@ -138,6 +174,23 @@ Validation ignores the `brands`, `description` and `topics` checks. To drop thos
 get the `orisec` domain accepted into
 [home-assistant/brands](https://github.com/home-assistant/brands) and set a repository
 description and topics in GitHub settings.
+
+### What HACS still needs
+
+A green `Validate` run means the metadata is valid; it does not mean a user can install
+the integration yet. Outstanding, in the order they block a user:
+
+| Gap | Why it matters | Where it is fixed |
+| --- | --- | --- |
+| No release published | `hacs.json` sets `zip_release`, so HACS only ever downloads `orisec.zip` from a release asset. With no release there is nothing to download and installation fails outright. | Run **Prepare Release**, then publish the draft |
+| No config flow or platforms | Home Assistant loads the component but registers no integration and no entities, so an install does nothing visible. | Add `config_flow.py` and at least one platform |
+| Repository description and topics unset | The two ignored checks above. | GitHub repository settings |
+| `orisec` not in `home-assistant/brands` | The third ignored check, and required for listing in the HACS default store. Custom-repository installs work without it. | PR to [home-assistant/brands](https://github.com/home-assistant/brands) |
+
+Two smaller notes: `hassfest` warns that `async_setup` is defined without a
+`CONFIG_SCHEMA`, which is resolved by the config flow work above; and
+`OrisecLocalClient` uses blocking sockets, so the integration layer must call it through
+`async_add_executor_job` rather than directly on the event loop.
 
 ## Releasing
 
