@@ -111,6 +111,21 @@ class ProtocolTests(unittest.TestCase):
         packet = unpack_message(fake_socket.sent_packets[0][0])
         self.assertEqual(packet, [Submessage(cmd_id=CMD_INFO_REQUEST, start=1, count=1, data=b"")])
 
+    def test_decode_strings_preserves_empty_positions(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=3, data=b"Front Door\x00\x00Hall\x00")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.52",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        self.assertEqual(client.read_zone_names(3), ["Front Door", "", "Hall"])
+
 
 if __name__ == "__main__":
     unittest.main()

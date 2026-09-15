@@ -101,7 +101,7 @@ class OrisecLocalClient:
 
         try:
             payload, _ = self._socket.recvfrom(4096)
-        except TimeoutError as exc:
+        except (socket.timeout, TimeoutError) as exc:
             raise OrisecError(f"Timed out waiting for response from {self.host}:{self.port}") from exc
 
         try:
@@ -220,7 +220,10 @@ class OrisecLocalClient:
     @staticmethod
     def _decode_strings(data: bytes, count: int) -> list[str]:
         values = [part.decode("ascii", errors="ignore").strip() for part in data.split(b"\x00")]
-        values = [value for value in values if value]
+        if values and values[-1] == "":
+            values.pop()
+        if len(values) < count:
+            values.extend([""] * (count - len(values)))
         return values[:count]
 
     @staticmethod
