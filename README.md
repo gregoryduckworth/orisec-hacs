@@ -5,6 +5,15 @@
 
 Minimal HACS repository for local-only communication with Orisec alarm panels.
 
+> [!WARNING]
+> **This project is under heavy development and will break without notice.**
+>
+> Nothing here is stable yet. The client API, the protocol helpers, the repository
+> layout, and the released versions themselves can all change or break at any time,
+> with no deprecation period and no migration notes. Treat every release as
+> experimental, pin an exact version if you depend on it, and expect to have to fix
+> things up when you move between versions.
+
 This repository exposes the known Orisec LAN APIs as a small Python client under
 `custom_components/orisec` so a Home Assistant integration can talk to the panel
 directly over UDP without relying on the Orisec cloud.
