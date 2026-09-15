@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
@@ -148,7 +148,7 @@ class OrisecConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: Any) -> OrisecOptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> OrisecOptionsFlow:
         """Return the options flow for an existing entry."""
 
         return OrisecOptionsFlow()
