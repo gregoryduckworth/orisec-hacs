@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
 import pytest
+from homeassistant.config_entries import HANDLERS
 
-from custom_components.orisec import DOMAIN, async_setup, const
+from custom_components.orisec import DOMAIN, const
+from custom_components.orisec.config_flow import OrisecConfigFlow
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPONENT_ROOT = REPO_ROOT / "custom_components" / "orisec"
+FLOW_SOURCE = (COMPONENT_ROOT / "config_flow.py").read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
 def manifest() -> dict:
     return json.loads((COMPONENT_ROOT / "manifest.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def strings() -> dict:
+    return json.loads((COMPONENT_ROOT / "strings.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +34,17 @@ def hacs_config() -> dict:
 class TestManifest:
     @pytest.mark.parametrize(
         "key",
-        ["domain", "name", "codeowners", "documentation", "iot_class", "issue_tracker", "version"],
+        [
+            "domain",
+            "name",
+            "codeowners",
+            "config_flow",
+            "documentation",
+            "integration_type",
+            "iot_class",
+            "issue_tracker",
+            "version",
+        ],
     )
     def test_declares_the_key_hacs_requires(self, manifest: dict, key: str) -> None:
         assert manifest.get(key)
@@ -61,6 +78,9 @@ class TestManifest:
     def test_needs_no_third_party_requirements(self, manifest: dict) -> None:
         assert manifest["requirements"] == []
 
+    def test_is_added_through_the_user_interface(self, manifest: dict) -> None:
+        assert manifest["config_flow"] is True
+
 
 class TestHacsConfig:
     def test_names_the_repository(self, hacs_config: dict) -> None:
@@ -81,9 +101,51 @@ class TestHacsConfig:
         assert hacs_config["filename"] in workflow
 
 
-class TestAsyncSetup:
-    def test_reports_a_successful_setup(self) -> None:
-        assert asyncio.run(async_setup(hass=None, config={})) is True
+class TestStrings:
+    def test_ships_english_translations_matching_the_source_strings(self, strings: dict) -> None:
+        translations = json.loads((COMPONENT_ROOT / "translations" / "en.json").read_text(encoding="utf-8"))
+
+        assert translations == strings
+
+    @pytest.mark.parametrize("step_id", ["user", "reauth_confirm"])
+    def test_describes_every_config_step_the_flow_can_show(self, strings: dict, step_id: str) -> None:
+        assert strings["config"]["step"][step_id]["data"]
+
+    def test_describes_the_options_step(self, strings: dict) -> None:
+        assert strings["options"]["step"]["init"]["data"]
+
+    def test_explains_every_form_error_the_flow_can_raise(self, strings: dict) -> None:
+        raised = _quoted_arguments(FLOW_SOURCE, 'return None, {"base": "')
+
+        assert raised <= set(strings["config"]["error"])
+
+    def test_explains_every_reason_the_flow_can_abort_for(self, strings: dict) -> None:
+        raised = _quoted_arguments(FLOW_SOURCE, 'reason="') | {
+            "already_configured",
+            "reauth_successful",
+        }
+
+        assert raised <= set(strings["config"]["abort"])
+
+    def test_names_every_entity_that_asks_for_a_translated_name(self, strings: dict) -> None:
+        source = (COMPONENT_ROOT / "sensor.py").read_text(encoding="utf-8")
+        keys = _quoted_arguments(source, '_attr_translation_key = "')
+
+        assert keys == set(strings["entity"]["sensor"])
+
+
+def _quoted_arguments(source: str, prefix: str) -> set[str]:
+    """Return the string literals that follow every occurrence of `prefix`."""
+
+    return {part.split('"', 1)[0] for part in source.split(prefix)[1:]}
+
+
+class TestConfigFlow:
+    def test_registers_itself_for_the_integration_domain(self) -> None:
+        assert HANDLERS[DOMAIN] is OrisecConfigFlow
+
+    def test_starts_at_version_one(self) -> None:
+        assert OrisecConfigFlow.VERSION == 1
 
 
 class TestConstants:

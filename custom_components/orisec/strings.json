@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to your Orisec panel",
+        "description": "Enter the address of the panel on your network and a user password it accepts.",
+        "data": {
+          "host": "Host",
+          "password": "Password",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "The IP address or hostname of the panel.",
+          "password": "A panel user password. Only ASCII characters are supported.",
+          "port": "The UDP port the panel listens on. Leave the default unless you changed it."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-enter your Orisec panel password",
+        "description": "The panel at {host} rejected the stored password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the panel. Check the host, port and that the panel's LAN interface is enabled.",
+      "invalid_auth": "The panel rejected that password.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This panel is already configured.",
+      "reauth_successful": "Re-authentication was successful.",
+      "wrong_panel": "That address belongs to a different panel than the one being re-authenticated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Orisec options",
+        "data": {
+          "scan_interval": "Poll interval"
+        },
+        "data_description": {
+          "scan_interval": "How often to read zone status from the panel, in seconds."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "panel_status": { "name": "Panel status" },
+      "serial_number": { "name": "Serial number" },
+      "model": { "name": "Model" },
+      "zone_count": { "name": "Configured zones" },
+      "area_count": { "name": "Areas" }
+    }
+  }
+}

@@ -1,3 +1,7 @@
 pytest==8.3.4
 pytest-cov==6.0.0
 ruff==0.14.0
+
+# Pulls in the Home Assistant version the integration layer is tested against,
+# along with the `hass` fixtures used to drive the config flow and platforms.
+pytest-homeassistant-custom-component==0.13.205
