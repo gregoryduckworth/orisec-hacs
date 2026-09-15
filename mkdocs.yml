@@ -1,0 +1,78 @@
+site_name: Orisec HACS
+site_description: Local-only Home Assistant control of Orisec alarm panels.
+site_url: https://gregoryduckworth.github.io/orisec-hacs/
+repo_url: https://github.com/gregoryduckworth/orisec-hacs
+repo_name: gregoryduckworth/orisec-hacs
+edit_uri: edit/main/docs/
+copyright: Released under the MIT License.
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Using the integration:
+      - Installation: installation.md
+      - Configuration: configuration.md
+      - Entities: entities.md
+      - Troubleshooting: troubleshooting.md
+  - Under the hood:
+      - Protocol: protocol.md
+      - Python client: client.md
+  - Contributing:
+      - Development: development.md
+      - Releasing: releasing.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  # Required by the card grid on the home page.
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+# Everything below is raised to a warning so `mkdocs build --strict` fails on it:
+# a page renamed without updating the links to it, or added without being put in
+# the nav, should not reach the published site.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+plugins:
+  - search
