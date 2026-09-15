@@ -1,0 +1,127 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Version bump to apply"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: "Preview the bump and changelog without committing or publishing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: ${{ inputs.release_type }} release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure the release runs from the default branch
+        if: github.ref_name != github.event.repository.default_branch
+        run: |
+          echo "Releases must be dispatched from ${{ github.event.repository.default_branch }}," \
+            "but this run is on ${{ github.ref_name }}." >&2
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Prepare version bump and changelog
+        id: prepare
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          args=(
+            --release-type "$RELEASE_TYPE"
+            --repository "$REPOSITORY"
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            "$RUNNER_TEMP/orisec.zip#orisec.zip"
+          )
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python scripts/release.py "${args[@]}"
+
+      - name: Fail if the tag already exists
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists." >&2
+            exit 1
+          fi
+
+      - name: Build the integration archive
+        run: |
+          cd custom_components/orisec
+          zip -r "$RUNNER_TEMP/orisec.zip" . -x '*.pyc' -x '__pycache__/*'
+
+      - name: Commit, tag and push the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md custom_components/orisec/manifest.json
+          git commit -m "chore(release): v$VERSION"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "$TAG"
+
+      # A release created with the default GITHUB_TOKEN does not trigger
+      # release.yml, so orisec.zip (which hacs.json installs from) is attached
+      # here rather than left to that workflow.
+      - name: Publish the GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      - name: Summarise the release
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+          PREVIOUS_VERSION: ${{ steps.prepare.outputs.previous_version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "## Dry run: $PREVIOUS_VERSION would become $TAG"
+            else
+              echo "## Released $TAG (was $PREVIOUS_VERSION)"
+            fi
+            echo
+            cat "$RUNNER_TEMP/release-notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
