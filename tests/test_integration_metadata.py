@@ -25,9 +25,19 @@ def hacs_config() -> dict:
 
 
 class TestManifest:
-    @pytest.mark.parametrize("key", ["domain", "name", "codeowners", "documentation", "iot_class", "version"])
+    @pytest.mark.parametrize(
+        "key",
+        ["domain", "name", "codeowners", "documentation", "iot_class", "issue_tracker", "version"],
+    )
     def test_declares_the_key_hacs_requires(self, manifest: dict, key: str) -> None:
         assert manifest.get(key)
+
+    @pytest.mark.parametrize("key", ["documentation", "issue_tracker"])
+    def test_publishes_the_url_over_https(self, manifest: dict, key: str) -> None:
+        assert manifest[key].startswith("https://")
+
+    def test_points_bug_reports_at_the_documented_repository(self, manifest: dict) -> None:
+        assert manifest["issue_tracker"] == f"{manifest['documentation']}/issues"
 
     def test_uses_the_same_domain_as_the_constants_module(self, manifest: dict) -> None:
         assert manifest["domain"] == DOMAIN

@@ -117,26 +117,25 @@ Lint and formatting are checked with [ruff](https://docs.astral.sh/ruff/), confi
 - `.github/workflows/release.yml` — runs on a GitHub release published by hand and attaches
   the `orisec.zip` asset that HACS installs from.
 
-Require the `Lint`, `Test (Python 3.12)`, `Test (Python 3.13)` and `Hassfest` checks in
-branch protection for `main` so untested code cannot reach the branch releases are cut
-from.
+Require the `Lint`, `Test (Python 3.12)`, `Test (Python 3.13)`, `Hassfest` and `HACS`
+checks in branch protection for `main` so untested code cannot reach the branch releases
+are cut from.
 
 ### HACS validation
 
-The `HACS` job does not pass yet, so it is not ready to be a required check. Two of its
-checks fail because the repository is private:
+HACS validates that a HACS *user* could install the integration, so it reads `hacs.json`
+and `manifest.json` over unauthenticated `raw.githubusercontent.com` rather than from the
+checkout. That means repository settings, not just files, decide whether the job passes:
 
-| Check | Why it fails |
-| --- | --- |
-| `hacsjson` | HACS reads `hacs.json` over unauthenticated `raw.githubusercontent.com`, which 404s |
-| `integration_manifest` | HACS reads `manifest.json` the same way |
+- The repository must be **public**, or both reads 404 and HACS reports the misleading
+  `invalid 'hacs.json'` / `expected a dictionary. Got None` instead of a 404.
+- `LICENSE` must carry a licence HACS recognises (MIT here). HACS reads
+  `license.spdx_id` from GitHub's repository metadata, which GitHub derives from the
+  **default branch** only — so a licence added on a PR branch still reports red until it
+  merges.
 
-Neither is fixable here: HACS validates that a HACS *user* could install the integration,
-and a user cannot read a private repository. Both pass as soon as the repository is
-public, at which point `HACS` can be added to the required checks above.
-
-Validation also ignores the `brands`, `description` and `topics` checks. To drop those
-ignores, get the `orisec` domain accepted into
+Validation ignores the `brands`, `description` and `topics` checks. To drop those ignores,
+get the `orisec` domain accepted into
 [home-assistant/brands](https://github.com/home-assistant/brands) and set a repository
 description and topics in GitHub settings.
 
