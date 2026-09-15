@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish release asset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Sync manifest version with the release tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "Releasing version ${version}"
+          jq --arg version "$version" '.version = $version' \
+            custom_components/orisec/manifest.json > manifest.json.tmp
+          mv manifest.json.tmp custom_components/orisec/manifest.json
+          cat custom_components/orisec/manifest.json
+
+      - name: Build the integration archive
+        run: |
+          cd custom_components/orisec
+          zip -r orisec.zip . -x '*.pyc' -x '__pycache__/*'
+
+      - name: Attach the archive to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            custom_components/orisec/orisec.zip --clobber

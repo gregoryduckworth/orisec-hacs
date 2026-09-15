@@ -1,0 +1,46 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Catch upstream Home Assistant / HACS requirement changes before a release does.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Run hassfest
+        uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Run HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          # Ignored checks and what it takes to drop each ignore:
+          #   brands      - requires the `orisec` domain to be accepted into
+          #                 https://github.com/home-assistant/brands
+          #   description - set a repository description in GitHub settings
+          #   topics      - add repository topics in GitHub settings
+          ignore: brands description topics

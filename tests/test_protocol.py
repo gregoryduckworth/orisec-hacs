@@ -6,14 +6,14 @@ import unittest
 
 from custom_components.orisec.api import AuthenticationError, OrisecLocalClient, ResponseError
 from custom_components.orisec.const import (
-    CMD_INFO_RESPONSE,
     CMD_INFO_REQUEST,
+    CMD_INFO_RESPONSE,
+    CMD_KEEPALIVE,
     CMD_LOGIN,
     CMD_MAX_ZONES,
     CMD_MOTION_EVENTS,
-    CMD_SESSION_INFO,
-    CMD_KEEPALIVE,
     CMD_SERIAL_NUMBER,
+    CMD_SESSION_INFO,
     CMD_ZONE_NAMES,
     CMD_ZONE_STATUS,
 )
@@ -93,7 +93,10 @@ class ProtocolTests(unittest.TestCase):
 
         self.assertEqual(fake_socket.sent_packets[0][1], ("192.168.1.50", 20202))
         keepalive_payload = unpack_message(fake_socket.sent_packets[-1][0])
-        self.assertEqual(keepalive_payload, [Submessage(cmd_id=CMD_KEEPALIVE, start=1, count=2, data=b"\x01\x00\x02\x04")])
+        self.assertEqual(
+            keepalive_payload,
+            [Submessage(cmd_id=CMD_KEEPALIVE, start=1, count=2, data=b"\x01\x00\x02\x04")],
+        )
         self.assertTrue(fake_socket.closed)
 
     def test_client_can_request_panel_model_without_login(self) -> None:

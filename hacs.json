@@ -1,6 +1,7 @@
 {
   "name": "Orisec HACS",
-  "domains": ["orisec"],
   "render_readme": true,
-  "homeassistant": "2024.7.0"
+  "homeassistant": "2024.7.0",
+  "zip_release": true,
+  "filename": "orisec.zip"
 }
