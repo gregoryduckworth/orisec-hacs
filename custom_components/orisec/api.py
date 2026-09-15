@@ -89,9 +89,13 @@ class OrisecLocalClient:
     def query(self, cmd_id: int, *, start: int = 1, count: int = 1, data: bytes = b"") -> Submessage:
         """Send a single command and return its response."""
 
-        return self.query_many([Submessage(cmd_id=cmd_id, start=start, count=count, data=data)])[cmd_id]
+        responses = self.query_many([Submessage(cmd_id=cmd_id, start=start, count=count, data=data)])
+        grouped = self._group_responses(responses)
+        if cmd_id not in grouped:
+            raise ResponseError(f"Panel did not return response for command 0x{cmd_id:04X}")
+        return grouped[cmd_id][0]
 
-    def query_many(self, submessages: list[Submessage]) -> dict[int, Submessage]:
+    def query_many(self, submessages: list[Submessage]) -> list[Submessage]:
         """Send one UDP datagram containing one or more submessages."""
 
         self.open()
@@ -109,7 +113,7 @@ class OrisecLocalClient:
         except ProtocolError as exc:
             raise ResponseError(str(exc)) from exc
 
-        return {message.cmd_id: message for message in responses}
+        return responses
 
     def send(self, *submessages: Submessage) -> None:
         """Send one UDP datagram without waiting for a response."""
@@ -120,11 +124,13 @@ class OrisecLocalClient:
     def login(self) -> None:
         """Authenticate to the panel and prime basic panel info."""
 
-        responses = self.query_many(
+        responses = self._group_responses(
+            self.query_many(
             [
                 Submessage(cmd_id=CMD_LOGIN, data=self.password.encode("ascii")),
                 Submessage(cmd_id=CMD_INFO_REQUEST),
             ]
+            )
         )
 
         if CMD_LOGIN not in responses:
@@ -132,8 +138,8 @@ class OrisecLocalClient:
         if CMD_INFO_RESPONSE not in responses:
             raise ResponseError("Panel did not return model info")
         if CMD_SESSION_INFO in responses:
-            self._session_info = responses[CMD_SESSION_INFO].data
-        self._panel_model = self._decode_panel_model(responses[CMD_INFO_RESPONSE].data)
+            self._session_info = responses[CMD_SESSION_INFO][0].data
+        self._panel_model = self._decode_panel_model(responses[CMD_INFO_RESPONSE][0].data)
 
     def keepalive(self) -> None:
         """Keep the current session alive."""
@@ -153,10 +159,10 @@ class OrisecLocalClient:
         if self._panel_model is not None:
             return self._panel_model
 
-        responses = self.query_many([Submessage(cmd_id=CMD_INFO_REQUEST)])
+        responses = self._group_responses(self.query_many([Submessage(cmd_id=CMD_INFO_REQUEST)]))
         if CMD_INFO_RESPONSE not in responses:
             raise ResponseError("Panel did not return model info")
-        self._panel_model = self._decode_panel_model(responses[CMD_INFO_RESPONSE].data)
+        self._panel_model = self._decode_panel_model(responses[CMD_INFO_RESPONSE][0].data)
         return self._panel_model
 
     def read_panel_status_raw(self) -> bytes:
@@ -167,7 +173,10 @@ class OrisecLocalClient:
     def read_serial_number(self) -> str:
         """Return the serial number string."""
 
-        return self.query(CMD_SERIAL_NUMBER).data.rstrip(b"\x00").decode("ascii")
+        try:
+            return self.query(CMD_SERIAL_NUMBER).data.rstrip(b"\x00").decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ResponseError("Serial number payload was not valid ASCII") from exc
 
     def read_max_zones(self) -> int:
         """Return the maximum zones supported by the panel."""
@@ -219,7 +228,7 @@ class OrisecLocalClient:
 
     @staticmethod
     def _decode_strings(data: bytes, count: int) -> list[str]:
-        values = [part.decode("ascii", errors="ignore").strip() for part in data.split(b"\x00")]
+        values = [part.decode("ascii", errors="ignore") for part in data.split(b"\x00")]
         if values and values[-1] == "":
             values.pop()
         if len(values) < count:
@@ -231,6 +240,13 @@ class OrisecLocalClient:
         if len(data) < 4:
             raise ResponseError("Panel model payload was too short")
         return unpack("<HH", data[:4])[1]
+
+    @staticmethod
+    def _group_responses(responses: list[Submessage]) -> dict[int, list[Submessage]]:
+        grouped: dict[int, list[Submessage]] = {}
+        for response in responses:
+            grouped.setdefault(response.cmd_id, []).append(response)
+        return grouped
 
     def _send(self, submessages: list[Submessage]) -> None:
         assert self._socket is not None

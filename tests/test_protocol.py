@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from custom_components.orisec.api import OrisecLocalClient
+from custom_components.orisec.api import OrisecLocalClient, ResponseError
 from custom_components.orisec.const import (
     CMD_INFO_RESPONSE,
     CMD_INFO_REQUEST,
@@ -13,6 +13,7 @@ from custom_components.orisec.const import (
     CMD_MOTION_EVENTS,
     CMD_SESSION_INFO,
     CMD_KEEPALIVE,
+    CMD_SERIAL_NUMBER,
     CMD_ZONE_NAMES,
 )
 from custom_components.orisec.protocol import Submessage, crc16_xmodem, pack_message, unpack_message
@@ -114,7 +115,7 @@ class ProtocolTests(unittest.TestCase):
     def test_decode_strings_preserves_empty_positions(self) -> None:
         fake_socket = FakeSocket(
             [
-                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=3, data=b"Front Door\x00\x00Hall\x00")),
+                pack_message(Submessage(cmd_id=CMD_ZONE_NAMES, count=3, data=b"Front Door\x00\x00Hall \x00")),
             ]
         )
 
@@ -124,7 +125,70 @@ class ProtocolTests(unittest.TestCase):
             socket_factory=lambda: fake_socket,
         )
 
-        self.assertEqual(client.read_zone_names(3), ["Front Door", "", "Hall"])
+        self.assertEqual(client.read_zone_names(3), ["Front Door", "", "Hall "])
+
+    def test_query_many_preserves_duplicate_command_ids(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(
+                    Submessage(cmd_id=CMD_ZONE_NAMES, count=1, data=b"Front Door\x00"),
+                    Submessage(cmd_id=CMD_ZONE_NAMES, count=1, data=b"Hall\x00"),
+                ),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.53",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        responses = client.query_many([Submessage(cmd_id=CMD_ZONE_NAMES, count=2)])
+        self.assertEqual(
+            responses,
+            [
+                Submessage(cmd_id=CMD_ZONE_NAMES, start=1, count=1, data=b"Front Door\x00"),
+                Submessage(cmd_id=CMD_ZONE_NAMES, start=1, count=1, data=b"Hall\x00"),
+            ],
+        )
+
+    def test_short_payload_decoders_raise_response_error(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_MAX_ZONES, data=b"\x14")),
+                pack_message(Submessage(cmd_id=CMD_MOTION_EVENTS, count=2, data=b"\x01\x00\x00")),
+                pack_message(Submessage(cmd_id=CMD_INFO_RESPONSE, data=b"\x00\x00\x14")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.54",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        with self.assertRaises(ResponseError):
+            client.read_max_zones()
+        with self.assertRaises(ResponseError):
+            client.read_motion_events(2)
+        with self.assertRaises(ResponseError):
+            client.read_panel_model()
+
+    def test_invalid_serial_payload_raises_response_error(self) -> None:
+        fake_socket = FakeSocket(
+            [
+                pack_message(Submessage(cmd_id=CMD_SERIAL_NUMBER, data=b"\xff\xfe\x00")),
+            ]
+        )
+
+        client = OrisecLocalClient(
+            "192.168.1.55",
+            "1234",
+            socket_factory=lambda: fake_socket,
+        )
+
+        with self.assertRaises(ResponseError):
+            client.read_serial_number()
 
 
 if __name__ == "__main__":
