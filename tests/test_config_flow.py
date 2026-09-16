@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import voluptuous as vol
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
@@ -11,9 +12,18 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.orisec.const import DEFAULT_SCAN_INTERVAL, DOMAIN
 
-from .conftest import PANEL_HOST, PANEL_PASSWORD, PANEL_PORT, PANEL_SERIAL, FakePanel
+from .conftest import (
+    LOCAL_ADDRESS,
+    PANEL_HOST,
+    PANEL_PASSWORD,
+    PANEL_PORT,
+    PANEL_SERIAL,
+    FakeDiscoverySocket,
+    FakePanel,
+)
 
 USER_INPUT = {CONF_HOST: PANEL_HOST, CONF_PASSWORD: PANEL_PASSWORD, CONF_PORT: PANEL_PORT}
+OTHER_PANEL_HOST = "192.168.1.200"
 
 
 async def start_user_flow(hass: HomeAssistant) -> str:
@@ -23,6 +33,19 @@ async def start_user_flow(hass: HomeAssistant) -> str:
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
     return result["flow_id"]
+
+
+async def show_user_form(hass: HomeAssistant) -> dict:
+    """Open the user flow and return the form it shows."""
+
+    return await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+
+
+def offered_hosts(schema: vol.Schema) -> list[str] | None:
+    """Return the hosts the form offers to pick from, or None when it only takes text."""
+
+    field = next(value for key, value in schema.schema.items() if key.schema == CONF_HOST)
+    return field.config.get("options")
 
 
 @pytest.mark.usefixtures("panel_sockets")
@@ -249,3 +272,79 @@ class TestOptionsFlow:
         }
 
         assert suggestions == {CONF_SCAN_INTERVAL: 90}
+
+
+@pytest.mark.usefixtures("panel_sockets")
+class TestDiscovery:
+    async def test_offers_a_panel_that_answered_the_scan(self, hass: HomeAssistant) -> None:
+        result = await show_user_form(hass)
+
+        assert offered_hosts(result["data_schema"]) == [PANEL_HOST]
+
+    async def test_offers_every_panel_it_found(
+        self, hass: HomeAssistant, panels_on_the_network: list[str]
+    ) -> None:
+        panels_on_the_network.append(OTHER_PANEL_HOST)
+
+        result = await show_user_form(hass)
+
+        assert offered_hosts(result["data_schema"]) == [PANEL_HOST, OTHER_PANEL_HOST]
+
+    async def test_still_accepts_a_host_the_scan_never_found(self, hass: HomeAssistant) -> None:
+        flow_id = await start_user_flow(hass)
+
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, {**USER_INPUT, CONF_HOST: "panel.lan"}
+        )
+
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_HOST] == "panel.lan"
+
+    async def test_leaves_out_a_panel_that_is_already_configured(
+        self, hass: HomeAssistant, config_entry: MockConfigEntry
+    ) -> None:
+        config_entry.add_to_hass(hass)
+
+        result = await show_user_form(hass)
+
+        assert offered_hosts(result["data_schema"]) is None
+
+    async def test_scans_the_networks_home_assistant_is_on(
+        self, hass: HomeAssistant, discovery_sockets: list[FakeDiscoverySocket]
+    ) -> None:
+        await show_user_form(hass)
+
+        assert LOCAL_ADDRESS in discovery_sockets[0].probed_hosts
+        assert not [host for host in discovery_sockets[0].probed_hosts if host.startswith("10.")]
+
+    async def test_scans_once_however_often_the_form_comes_back(
+        self, hass: HomeAssistant, panel: FakePanel, discovery_sockets: list[FakeDiscoverySocket]
+    ) -> None:
+        panel.password = "9999"
+        flow_id = await start_user_flow(hass)
+
+        await hass.config_entries.flow.async_configure(flow_id, USER_INPUT)
+        await hass.config_entries.flow.async_configure(flow_id, USER_INPUT)
+
+        assert len(discovery_sockets) == 1
+
+
+@pytest.mark.usefixtures("panel_sockets")
+class TestDiscoveryWithoutPanels:
+    @pytest.fixture
+    def panels_on_the_network(self) -> list[str]:
+        """Nothing on the network answers a probe."""
+
+        return []
+
+    async def test_asks_for_a_host_to_type_in(self, hass: HomeAssistant) -> None:
+        result = await show_user_form(hass)
+
+        assert offered_hosts(result["data_schema"]) is None
+
+    async def test_still_adds_a_panel_the_user_knows_the_address_of(self, hass: HomeAssistant) -> None:
+        flow_id = await start_user_flow(hass)
+
+        result = await hass.config_entries.flow.async_configure(flow_id, USER_INPUT)
+
+        assert result["type"] is FlowResultType.CREATE_ENTRY

@@ -7,10 +7,11 @@ from dataclasses import dataclass, field
 from struct import pack
 
 import pytest
+from homeassistant.components import network
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.orisec import api
+from custom_components.orisec import api, discovery
 from custom_components.orisec.api import OrisecLocalClient
 from custom_components.orisec.const import (
     CMD_AREA_COUNT,
@@ -35,6 +36,8 @@ PANEL_PORT = 20202
 PANEL_PASSWORD = "1234"
 PANEL_SERIAL = "ORI-0001"
 PANEL_MODEL = 40
+LOCAL_ADDRESS = "192.168.1.10"
+LOCAL_PREFIX = 24
 
 
 @pytest.fixture(autouse=True)
@@ -226,6 +229,119 @@ def panel_sockets(panel: FakePanel, monkeypatch: pytest.MonkeyPatch) -> Iterator
 
     monkeypatch.setattr(api, "default_socket_factory", _factory)
     yield sockets
+
+
+PANEL_REPLY = pack_message(Submessage(cmd_id=CMD_INFO_RESPONSE, data=pack("<HH", 0, PANEL_MODEL)))
+
+
+class FakeDiscoverySocket:
+    """A UDP socket that answers a discovery probe on behalf of some addresses.
+
+    Every probe sent to an address in `panel_hosts` queues one reply, so a scan
+    finds exactly the panels a test put on the network and nothing else.
+    """
+
+    def __init__(
+        self,
+        panel_hosts: Iterable[str] = (),
+        *,
+        reply: bytes | None = None,
+        source: str | None = None,
+        unreachable: Iterable[str] = (),
+        recv_error: BaseException | None = None,
+    ) -> None:
+        self._panel_hosts = set(panel_hosts)
+        self._reply = PANEL_REPLY if reply is None else reply
+        self._source = source
+        self._unreachable = set(unreachable)
+        self._recv_error = recv_error
+        self._queued: list[tuple[bytes, tuple[str, int]]] = []
+        self.probed: list[tuple[str, int]] = []
+        self.probes: list[bytes] = []
+        self.timeout: float | None = None
+        self.close_count = 0
+
+    @property
+    def probed_hosts(self) -> list[str]:
+        return [host for host, _ in self.probed]
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def sendto(self, payload: bytes, address: tuple[str, int]) -> None:
+        host, port = address
+        if host in self._unreachable:
+            raise OSError("network is unreachable")
+
+        self.probed.append((host, port))
+        self.probes.append(payload)
+        if host in self._panel_hosts:
+            self._queued.append((self._reply, (self._source or host, port)))
+
+    def recvfrom(self, size: int) -> tuple[bytes, tuple[str, int]]:
+        if self._recv_error is not None:
+            raise self._recv_error
+        if not self._queued:
+            raise TimeoutError
+        return self._queued.pop(0)
+
+    def close(self) -> None:
+        self.close_count += 1
+
+
+@pytest.fixture
+def panels_on_the_network() -> list[str]:
+    """The addresses that answer a discovery probe. Override to change the scan."""
+
+    return [PANEL_HOST]
+
+
+@pytest.fixture(autouse=True)
+def discovery_sockets(
+    panels_on_the_network: list[str], monkeypatch: pytest.MonkeyPatch
+) -> list[FakeDiscoverySocket]:
+    """Keep every scan the flow runs on fake sockets, and record the ones it opened."""
+
+    sockets: list[FakeDiscoverySocket] = []
+
+    def _factory() -> FakeDiscoverySocket:
+        scan_socket = FakeDiscoverySocket(panels_on_the_network)
+        sockets.append(scan_socket)
+        return scan_socket
+
+    monkeypatch.setattr(discovery, "default_discovery_socket_factory", _factory)
+    return sockets
+
+
+@pytest.fixture(autouse=True)
+def local_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give a scan one enabled network to sweep, whatever the machine running the tests has."""
+
+    adapters = [
+        {
+            "name": "eth0",
+            "index": 1,
+            "enabled": True,
+            "auto": True,
+            "default": True,
+            "ipv4": [{"address": LOCAL_ADDRESS, "network_prefix": LOCAL_PREFIX}],
+            "ipv6": [],
+        },
+        {
+            "name": "eth1",
+            "index": 2,
+            "enabled": False,
+            "auto": False,
+            "default": False,
+            "ipv4": [{"address": "10.0.0.10", "network_prefix": 24}],
+            "ipv6": [],
+        },
+    ]
+
+    async def _async_get_adapters(hass: object) -> list[dict]:
+        return adapters
+
+    monkeypatch.setattr(network, "async_get_adapters", _async_get_adapters)
 
 
 @pytest.fixture

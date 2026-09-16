@@ -23,6 +23,8 @@ under `custom_components/orisec`.
   into a Home Assistant config for development.
 - **[Configuration](configuration.md)** — what the config flow asks for, how a panel is
   identified, and how often it is polled.
+- **[Discovery](discovery.md)** — how the config flow scans for panels, and what finding
+  one passively would take.
 - **[Entities](entities.md)** — the device and sensors a panel creates, and why the
   values are raw.
 - **[Troubleshooting](troubleshooting.md)** — what each setup error means, and how to

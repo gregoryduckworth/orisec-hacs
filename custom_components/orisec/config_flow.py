@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from functools import partial
+from ipaddress import IPv4Network
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.components import network
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, callback
@@ -14,6 +17,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -27,18 +33,39 @@ from .const import (
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
 )
+from .discovery import discover_panel_hosts
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_HOST): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
-        vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): NumberSelector(
-            NumberSelectorConfig(min=1, max=65535, step=1, mode=NumberSelectorMode.BOX)
-        ),
-    }
-)
+
+def user_schema(discovered_hosts: list[str]) -> vol.Schema:
+    """Build the add-a-panel form, offering the panels a scan found.
+
+    A discovered host is a suggestion, never a restriction: the field stays a
+    free-text one so a panel on another subnet, behind a hostname, or on a
+    non-default port can still be typed in.
+    """
+
+    host_field: SelectSelector | TextSelector = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT))
+    if discovered_hosts:
+        host_field = SelectSelector(
+            SelectSelectorConfig(
+                options=discovered_hosts,
+                custom_value=True,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
+
+    return vol.Schema(
+        {
+            vol.Required(CONF_HOST): host_field,
+            vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+            vol.Required(CONF_PORT, default=DEFAULT_PORT): NumberSelector(
+                NumberSelectorConfig(min=1, max=65535, step=1, mode=NumberSelectorMode.BOX)
+            ),
+        }
+    )
+
 
 STEP_REAUTH_DATA_SCHEMA = vol.Schema(
     {
@@ -83,12 +110,19 @@ class OrisecConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        self._discovered_hosts: list[str] = []
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Collect the panel address and password, then prove they work."""
 
         errors: dict[str, str] = {}
 
-        if user_input is not None:
+        if user_input is None:
+            # Scanned once, when the form is first built: a second attempt after
+            # a rejected password should come straight back, not wait again.
+            self._discovered_hosts = await self._async_discover_hosts()
+        else:
             user_input = {**user_input, CONF_PORT: int(user_input[CONF_PORT])}
             layout, errors = await self._async_probe(user_input)
 
@@ -102,7 +136,7 @@ class OrisecConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=self.add_suggested_values_to_schema(STEP_USER_DATA_SCHEMA, suggested),
+            data_schema=self.add_suggested_values_to_schema(user_schema(self._discovered_hosts), suggested),
             errors=errors,
         )
 
@@ -132,6 +166,28 @@ class OrisecConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={CONF_HOST: entry.data[CONF_HOST]},
             errors=errors,
         )
+
+    async def _async_discover_hosts(self) -> list[str]:
+        """Return the panels answering on this machine's networks, ready to offer.
+
+        Only the default port is scanned, because the form has not been shown
+        yet and so nobody has said the panel listens anywhere else. Panels that
+        are already configured are dropped: offering one only leads to the
+        *already configured* abort.
+        """
+
+        adapters = await network.async_get_adapters(self.hass)
+        networks = [
+            IPv4Network(f"{address['address']}/{address['network_prefix']}", strict=False)
+            for adapter in adapters
+            if adapter["enabled"]
+            for address in adapter["ipv4"]
+        ]
+
+        hosts = await self.hass.async_add_executor_job(partial(discover_panel_hosts, networks))
+        configured = {entry.data[CONF_HOST] for entry in self._async_current_entries()}
+
+        return [host for host in hosts if host not in configured]
 
     async def _async_probe(self, data: Mapping[str, Any]) -> tuple[PanelLayout | None, dict[str, str]]:
         """Return the panel layout, or the form error explaining why there is none."""
