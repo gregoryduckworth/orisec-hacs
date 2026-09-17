@@ -37,6 +37,7 @@ nav:
   - Using the integration:
       - Installation: installation.md
       - Configuration: configuration.md
+      - Discovery: discovery.md
       - Entities: entities.md
       - Troubleshooting: troubleshooting.md
   - Under the hood:

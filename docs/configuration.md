@@ -10,7 +10,7 @@ Everything is configured from the Home Assistant UI. There is nothing to put in
 
     | Field | Meaning |
     | --- | --- |
-    | **Host** | The IP address or hostname of the panel on your network. |
+    | **Host** | The panel to add. Panels that answered a [scan of your network](discovery.md) are offered in the list; anything else is typed in. |
     | **Password** | A panel user password. Only ASCII characters are supported. |
     | **Port** | The UDP port the panel listens on. Defaults to `20202`; leave it unless you changed it. |
 
@@ -19,8 +19,11 @@ Everything is configured from the Home Assistant UI. There is nothing to put in
    the fact. If it fails, the host and port you typed are offered back — only the
    password is cleared.
 
-Give the panel a static address, or a DHCP reservation. Nothing here discovers a panel
-that has moved on its own; you would have to correct the entry by hand.
+Opening the form scans for panels first, which takes about two seconds — see
+[Discovery](discovery.md) for what it sends and what it cannot find. It is a convenience
+for adding a panel, not a substitute for a stable address: give the panel a static
+address or a DHCP reservation, because nothing re-scans on its own once the entry exists.
+A panel that moves anyway is picked up by [adding it again](#how-a-panel-is-identified).
 
 ### How a panel is identified
 

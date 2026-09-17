@@ -10,11 +10,13 @@
 | `custom_components/orisec/sensor.py` | The entities built from what the panel reports |
 | `custom_components/orisec/entity.py` | The device every entity attaches to |
 | `custom_components/orisec/api.py` | High-level local UDP client |
+| `custom_components/orisec/discovery.py` | The network scan that finds panels for the flow |
 | `custom_components/orisec/protocol.py` | Packet and submessage encoding and decoding |
 | `custom_components/orisec/const.py` | Known command identifiers and defaults |
 | `custom_components/orisec/strings.json` | Flow and entity text, mirrored into `translations/en.json` |
 | `scripts/release.py` | Version bump and changelog generation used by the release workflow |
 | `scripts/probe.py` | Command line probe that dumps what a real panel reports |
+| `scripts/discover.py` | Command line scan for panels, without Home Assistant |
 | `scripts/install_local.py` | Link or copy the component into a Home Assistant config |
 | `docs/` | This site |
 
@@ -64,6 +66,7 @@ The tests are grouped by concern:
 | `tests/test_api_session.py` | Login, session and model caching, auth failures, keepalive |
 | `tests/test_api_reads.py` | Every panel read command and payload decoder |
 | `tests/test_config_flow.py` | Adding a panel, the errors the form can show, reauth, options |
+| `tests/test_discovery.py` | Which addresses a scan probes, and what it accepts as a panel |
 | `tests/test_init.py` | Config entry setup, polling, reload and teardown |
 | `tests/test_sensor.py` | The entities and the device a config entry creates |
 | `tests/test_integration_metadata.py` | `manifest.json`, `hacs.json`, `strings.json` and `const` consistency |

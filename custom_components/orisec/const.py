@@ -21,6 +21,12 @@ CMD_MOTION_EVENTS = 0x277E
 
 KEEPALIVE_PAYLOAD = b"\x01\x00\x02\x04"
 
+# Network scan defaults. The scan sends one datagram per address and then waits
+# once, so the timeout is how long the whole scan takes, not how long one
+# address gets. A /22 is the largest network worth sweeping in front of a form.
+DISCOVERY_TIMEOUT = 2.0
+MAX_DISCOVERY_NETWORK_SIZE = 1024
+
 # Home Assistant integration defaults.
 DEFAULT_SCAN_INTERVAL = 30
 MIN_SCAN_INTERVAL = 5

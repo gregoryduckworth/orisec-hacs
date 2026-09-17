@@ -3,6 +3,7 @@
   "name": "Orisec Local",
   "codeowners": ["@gregoryduckworth"],
   "config_flow": true,
+  "dependencies": ["network"],
   "documentation": "https://github.com/gregoryduckworth/orisec-hacs",
   "integration_type": "device",
   "iot_class": "local_polling",

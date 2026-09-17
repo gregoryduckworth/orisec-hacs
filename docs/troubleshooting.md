@@ -45,6 +45,20 @@ logger:
 The coordinator logs each failed update, and the config flow logs the traceback behind
 an *Unexpected error*.
 
+## The setup form did not offer my panel
+
+The **Host** field only lists panels that answered the scan the form runs, and that scan
+has limits worth checking before treating it as a fault: it probes UDP `20202` only, it
+skips networks larger than 1024 addresses, and it cannot reach a panel on a subnet Home
+Assistant is not itself on. An already-configured panel is left out deliberately.
+
+Type the address in — the field takes free text, and nothing about the panel that is
+added this way differs. If the panel is on the same subnet and
+[`discover.py`](discovery.md#scan-without-home-assistant) cannot see it either while
+`probe.py` can, that is worth
+[reporting](https://github.com/gregoryduckworth/orisec-hacs/issues): it means panels only
+answer once logged in, which is the thing the scan cannot yet confirm.
+
 ## Probe a panel without Home Assistant
 
 The fastest check against real hardware. It needs only the panel's address and a user
@@ -95,3 +109,15 @@ model, the relevant log lines, and — if the problem is about what a value mean
 `probe.py` output alongside what the panel was actually doing at the time. That last
 pairing is what it takes to confirm a bit layout, which is the main thing blocking
 [richer entities](entities.md#why-the-values-are-raw).
+
+## Scan a network without Home Assistant
+
+The counterpart to `probe.py`, and the same scan the setup form runs:
+
+```bash
+python3 scripts/discover.py --network 192.168.1.0/24
+```
+
+It prints every address that answered a probe with a valid protocol frame. See
+[Discovery](discovery.md#scan-without-home-assistant) for the arguments and for what a
+scan that finds nothing tells you.

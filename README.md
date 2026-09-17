@@ -38,10 +38,11 @@ Everything is configured from the Home Assistant UI; there is nothing to put in
 `configuration.yaml`.
 
 1. **Settings → Devices & services → Add integration → Orisec Local.**
-2. Enter the panel's IP address or hostname and a user password it accepts. The UDP
-   port defaults to `20202`.
-3. The flow logs in before it saves anything, so a wrong address or password is
-   reported on the form rather than after the fact.
+2. Pick the panel from the **Host** list, or enter its IP address or hostname if it is
+   not there. Opening the form scans your network for panels first; the UDP port
+   defaults to `20202`.
+3. Enter a user password the panel accepts. The flow logs in before it saves anything,
+   so a wrong address or password is reported on the form rather than after the fact.
 
 The panel's serial number identifies the entry, so the same panel cannot be added twice,
 and moving it to a new IP address updates the existing entry instead of creating a second
@@ -49,7 +50,9 @@ one. **Options** (the *Configure* button) sets how often the panel is polled, be
 and 3600 seconds, defaulting to 30.
 
 Full details, including re-authentication:
-[Configuration](https://gregoryduckworth.github.io/orisec-hacs/configuration/).
+[Configuration](https://gregoryduckworth.github.io/orisec-hacs/configuration/). What that
+scan sends, and what it cannot do yet:
+[Discovery](https://gregoryduckworth.github.io/orisec-hacs/discovery/).
 
 ## What you get
 
@@ -74,6 +77,7 @@ something does not work.
 | --- | --- |
 | [Installation](https://gregoryduckworth.github.io/orisec-hacs/installation/) | HACS install, betas, and running a checkout |
 | [Configuration](https://gregoryduckworth.github.io/orisec-hacs/configuration/) | The config flow, options and re-authentication |
+| [Discovery](https://gregoryduckworth.github.io/orisec-hacs/discovery/) | Finding panels on the network, and what passive discovery would need |
 | [Entities](https://gregoryduckworth.github.io/orisec-hacs/entities/) | The device and sensors a panel creates |
 | [Troubleshooting](https://gregoryduckworth.github.io/orisec-hacs/troubleshooting/) | Setup errors, debug logging and `probe.py` |
 | [Protocol](https://gregoryduckworth.github.io/orisec-hacs/protocol/) | Frame layout, the CRC and every known command |

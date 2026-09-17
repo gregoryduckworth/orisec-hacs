@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Connect to your Orisec panel",
-        "description": "Enter the address of the panel on your network and a user password it accepts.",
+        "description": "Pick a panel found on your network, or enter its address, along with a user password it accepts.",
         "data": {
           "host": "Host",
           "password": "Password",
           "port": "Port"
         },
         "data_description": {
-          "host": "The IP address or hostname of the panel.",
+          "host": "The IP address or hostname of the panel. Panels that answered a scan of your network are offered in the list.",
           "password": "A panel user password. Only ASCII characters are supported.",
           "port": "The UDP port the panel listens on. Leave the default unless you changed it."
         }
