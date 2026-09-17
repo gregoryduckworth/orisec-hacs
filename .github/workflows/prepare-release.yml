@@ -34,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Needed to start release.yml once the tag is pushed.
+      actions: write
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -89,11 +91,6 @@ jobs:
             exit 1
           fi
 
-      - name: Build the integration archive
-        run: |
-          cd custom_components/orisec
-          zip -r "$RUNNER_TEMP/orisec.zip" . -x '*.pyc' -x '__pycache__/*'
-
       - name: Commit, tag and push the release
         if: ${{ !inputs.dry_run }}
         env:
@@ -113,35 +110,58 @@ jobs:
           git push origin "HEAD:${GITHUB_REF_NAME}"
           git push origin "$TAG"
 
-      # A release created with the default GITHUB_TOKEN does not trigger
-      # release.yml, so orisec.zip (which hacs.json installs from) is attached
-      # here rather than left to that workflow.
-      - name: Publish the GitHub release
+      # Drafted rather than published: release.yml builds and attaches
+      # orisec.zip (the asset hacs.json installs from) and publishes the draft,
+      # so nothing is installable until that workflow has a green CI run.
+      - name: Draft the GitHub release
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.prepare.outputs.tag }}
           PRERELEASE: ${{ steps.prepare.outputs.prerelease }}
         run: |
-          args=(--title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md")
+          args=(--draft --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [ "$PRERELEASE" = "true" ]; then
             args+=(--prerelease)
           fi
-          # The zip is the asset hacs.json installs from, so it is attached here
-          # as part of creating the release rather than uploaded afterwards.
-          gh release create "$TAG" "${args[@]}" "$RUNNER_TEMP/orisec.zip#orisec.zip"
+          gh release create "$TAG" "${args[@]}"
+
+      # Creating the release with the default GITHUB_TOKEN does not fire the
+      # `release` event, so release.yml has to be started explicitly. A
+      # workflow_dispatch is the one event GITHUB_TOKEN can still trigger, and
+      # it is dispatched from the tag so the run builds the released code.
+      - name: Start the Release workflow
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          # The tag was pushed moments ago and can take a little while to become
+          # dispatchable, so give it a few attempts before failing the release.
+          for _ in 1 2 3 4 5; do
+            if gh workflow run release.yml --ref "$TAG"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Could not start the Release workflow for $TAG." >&2
+          exit 1
 
       - name: Summarise the release
         env:
           TAG: ${{ steps.prepare.outputs.tag }}
           PREVIOUS_VERSION: ${{ steps.prepare.outputs.previous_version }}
           DRY_RUN: ${{ inputs.dry_run }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           {
             if [ "$DRY_RUN" = "true" ]; then
               echo "## Dry run: $PREVIOUS_VERSION would become $TAG"
             else
-              echo "## Released $TAG (was $PREVIOUS_VERSION)"
+              echo "## Drafted $TAG (was $PREVIOUS_VERSION)"
+              echo
+              echo "The [Release workflow]($REPOSITORY_URL/actions/workflows/release.yml)" \
+                "publishes it once CI is green."
             fi
             echo
             cat "$RUNNER_TEMP/release-notes.md"
