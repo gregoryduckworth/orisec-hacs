@@ -31,10 +31,10 @@ async def poll(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
 
     freezer.tick(timedelta(seconds=DEFAULT_SCAN_INTERVAL + 1))
     async_fire_time_changed(hass)
-    # Twice: the first drain only gets as far as handing the read to an
-    # executor thread, the second picks the result back up.
-    await hass.async_block_till_done()
-    await hass.async_block_till_done()
+    # The coordinator refreshes in a background task, which a plain drain does
+    # not wait for. Draining twice instead only wins the race while the read
+    # finishes quickly, so wait for the background task itself.
+    await hass.async_block_till_done(wait_background_tasks=True)
 
 
 @pytest.mark.usefixtures("panel_sockets")

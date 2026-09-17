@@ -19,11 +19,17 @@ anything fails. Then it:
 2. Generates release notes from the commits since the previous tag and prepends them to
    `CHANGELOG.md`.
 3. Commits, tags `vX.Y.Z`, and pushes.
-4. Builds `orisec.zip` and publishes the GitHub release with the notes and that asset
-   attached. It is attached here rather than by `release.yml`, because a release created
-   with the default `GITHUB_TOKEN` does not trigger other workflows. `release.yml` still
-   covers releases published by hand, and gates the asset on a green `ci.yml` run so a
-   hand-published release with failing tests never becomes installable.
+4. Creates the GitHub release with those notes as a **draft**, so nothing is installable
+   yet.
+5. Starts the **Release** workflow (`.github/workflows/release.yml`) for the new tag. A
+   release created with the default `GITHUB_TOKEN` does not trigger other workflows, so
+   the Release workflow is dispatched explicitly rather than left to the `release` event.
+
+The Release workflow then runs `ci.yml` against the tag, builds `orisec.zip`, attaches it,
+and publishes the draft. Gating the publish on a green CI run means a release with failing
+tests never becomes installable: if CI fails the tag exists but the release stays a draft,
+so fix the problem on `main` and re-run the Release workflow from the tag. It also still
+runs on releases published by hand.
 
 Tick **dry run** to see the resulting version and changelog in the workflow summary
 without committing, tagging, or publishing anything.

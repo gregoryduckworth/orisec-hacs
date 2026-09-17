@@ -70,6 +70,7 @@ The tests are grouped by concern:
 | `tests/test_docs.py` | That this site stays in step with the code and is wired into the build |
 | `tests/test_install_local.py` | Linking, copying and removing a local install |
 | `tests/test_release.py` | The version bump and changelog helpers in `scripts/release.py` |
+| `tests/test_release_workflows.py` | That cutting a release starts the workflow that publishes it |
 
 The 100% gate covers `custom_components/orisec` — the code HACS ships. The helpers under
 `scripts/` are tested but not gated.
@@ -114,8 +115,8 @@ runs and the deploy step is what fails.
 | `.github/workflows/ci.yml` | Runs ruff and the test suite, including the coverage gate, on Python 3.12 and 3.13 for every push to `main` and every pull request |
 | `.github/workflows/validate.yml` | Runs Home Assistant `hassfest` and HACS repository validation, also on a weekly schedule so upstream requirement changes surface before a release does |
 | `.github/workflows/docs.yml` | Builds this site on every pull request and publishes it from `main` |
-| `.github/workflows/prepare-release.yml` | Cuts a release: bumps the version, writes the changelog, tags, and publishes |
-| `.github/workflows/release.yml` | Runs on a GitHub release published by hand and attaches the `orisec.zip` asset that HACS installs from |
+| `.github/workflows/prepare-release.yml` | Cuts a release: bumps the version, writes the changelog, tags, drafts the release, and starts `release.yml` for the new tag |
+| `.github/workflows/release.yml` | Publishes a release: runs CI against the tag, attaches the `orisec.zip` asset that HACS installs from, and publishes the draft. Started by `prepare-release.yml`, by publishing a release by hand, or by dispatching it from a tag |
 
 Require the `Lint`, `Test (Python 3.12)`, `Test (Python 3.13)`, `Hassfest`, `HACS` and
 `Build docs` checks in branch protection for `main` so untested code cannot reach the
